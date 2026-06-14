@@ -3,9 +3,11 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export const DEFAULT_LOCAL_DB_RELATIVE_PATH = join(".midday", "midday.sqlite");
 
-type LocalDbPathEnv = Pick<
+type LocalDbPathEnv = Partial<
+  Pick<
   NodeJS.ProcessEnv,
   "MIDDAY_DESKTOP_DATA_DIR" | "MIDDAY_SQLITE_PATH"
+  >
 >;
 
 export type ResolveLocalDbPathOptions = {
