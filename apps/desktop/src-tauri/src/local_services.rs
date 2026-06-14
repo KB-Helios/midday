@@ -171,6 +171,10 @@ fn port_from_url(url: &str, fallback: &str) -> String {
 
 fn local_runtime_env() -> Vec<(String, String)> {
     vec![
+        (
+            "FILE_KEY_SECRET".to_string(),
+            "midday-local-desktop-file-key-secret".to_string(),
+        ),
         ("MIDDAY_DESKTOP_RUNTIME".to_string(), "local".to_string()),
         ("MIDDAY_LOCAL_FIRST".to_string(), "true".to_string()),
     ]

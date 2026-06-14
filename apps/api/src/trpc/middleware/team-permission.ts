@@ -2,7 +2,13 @@ import type { Session } from "@api/utils/auth";
 import { withRetryOnPrimary } from "@api/utils/db-retry";
 import { teamCache } from "@midday/cache/team-cache";
 import type { Database } from "@midday/db/client";
+import {
+  getLocalUserById,
+  getSeededLocalDb,
+  hasLocalTeamAccess,
+} from "@midday/db/local-queries";
 import { createLoggerWithContext } from "@midday/logger";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 import { TRPCError } from "@trpc/server";
 
 const DEBUG_PERF = process.env.DEBUG_PERF === "true";
@@ -36,6 +42,43 @@ async function resolveTeamPermission(
       code: "UNAUTHORIZED",
       message: "No permission to access this team",
     });
+  }
+
+  if (isLocalDesktopRuntime()) {
+    const local = getSeededLocalDb();
+    const user = getLocalUserById(local, userId);
+
+    if (!user) {
+      teamPermissionLogger.warn("permission denied: local user not found", {
+        procedurePath,
+        userId,
+        requestId,
+        cfRay,
+      });
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "User not found",
+      });
+    }
+
+    if (
+      user.teamId &&
+      !hasLocalTeamAccess(local, user.teamId, userId)
+    ) {
+      teamPermissionLogger.warn("permission denied: local team access missing", {
+        procedurePath,
+        userId,
+        teamId: user.teamId,
+        requestId,
+        cfRay,
+      });
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "No permission to access this team",
+      });
+    }
+
+    return { teamId: user.teamId };
   }
 
   const dbStart = DEBUG_PERF ? performance.now() : 0;

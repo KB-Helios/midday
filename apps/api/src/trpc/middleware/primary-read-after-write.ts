@@ -2,6 +2,7 @@ import type { Session } from "@api/utils/auth";
 import { replicationCache } from "@midday/cache/replication-cache";
 import type { Database, DatabaseWithPrimary } from "@midday/db/client";
 import { createLoggerWithContext } from "@midday/logger";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 
 const DEBUG_PERF = process.env.DEBUG_PERF === "true";
 const perfLogger = createLoggerWithContext("perf:trpc");
@@ -26,6 +27,10 @@ export const withPrimaryReadAfterWrite = async <TReturn>(opts: {
   const { ctx, type, next } = opts;
   const teamId = ctx.teamId;
   const forcePrimary = ctx.forcePrimary;
+
+  if (isLocalDesktopRuntime()) {
+    return next({ ctx });
+  }
 
   if (forcePrimary && type !== "mutation") {
     const dbWithPrimary = ctx.db as DatabaseWithPrimary;

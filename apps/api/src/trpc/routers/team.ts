@@ -37,7 +37,15 @@ import {
   updateTeamById,
   updateTeamMember,
 } from "@midday/db/queries";
+import {
+  getLocalTeamById,
+  getLocalTeamMembersByTeamId,
+  getLocalTeamsByUserId,
+  getSeededLocalDb,
+  updateLocalTeamById,
+} from "@midday/db/local-queries";
 import { triggerJob } from "@midday/job-client";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 import { tasks } from "@trigger.dev/sdk";
 import { TRPCError } from "@trpc/server";
 
@@ -47,12 +55,23 @@ export const teamRouter = createTRPCRouter({
       return null;
     }
 
+    if (isLocalDesktopRuntime()) {
+      return getLocalTeamById(getSeededLocalDb(), teamId) ?? null;
+    }
+
     return getTeamById(db, teamId!);
   }),
 
   update: protectedProcedure
     .input(updateTeamByIdSchema)
     .mutation(async ({ ctx: { db, teamId }, input }) => {
+      if (isLocalDesktopRuntime()) {
+        return updateLocalTeamById(getSeededLocalDb(), {
+          id: teamId!,
+          data: input,
+        });
+      }
+
       return updateTeamById(db, {
         id: teamId!,
         data: input,
@@ -60,10 +79,18 @@ export const teamRouter = createTRPCRouter({
     }),
 
   members: protectedProcedure.query(async ({ ctx: { db, teamId } }) => {
+    if (isLocalDesktopRuntime()) {
+      return getLocalTeamMembersByTeamId(getSeededLocalDb(), teamId!);
+    }
+
     return getTeamMembersByTeamId(db, teamId!);
   }),
 
   list: protectedProcedure.query(async ({ ctx: { db, session } }) => {
+    if (isLocalDesktopRuntime()) {
+      return getLocalTeamsByUserId(getSeededLocalDb(), session.user.id);
+    }
+
     return getTeamsByUserId(db, session.user.id);
   }),
 
@@ -305,10 +332,18 @@ export const teamRouter = createTRPCRouter({
     }),
 
   teamInvites: protectedProcedure.query(async ({ ctx: { db, teamId } }) => {
+    if (isLocalDesktopRuntime()) {
+      return [];
+    }
+
     return getTeamInvites(db, teamId!);
   }),
 
   invitesByEmail: protectedProcedure.query(async ({ ctx: { db, session } }) => {
+    if (isLocalDesktopRuntime()) {
+      return [];
+    }
+
     return getInvitesByEmail(db, session.user.email!);
   }),
 
@@ -381,6 +416,10 @@ export const teamRouter = createTRPCRouter({
     }),
 
   availablePlans: protectedProcedure.query(async ({ ctx: { db, teamId } }) => {
+    if (isLocalDesktopRuntime()) {
+      return { starter: true, pro: true };
+    }
+
     return getAvailablePlans(db, teamId!);
   }),
 
@@ -425,6 +464,10 @@ export const teamRouter = createTRPCRouter({
   connectionStatus: protectedProcedure.query(
     async ({ ctx: { db, teamId } }) => {
       if (!teamId) {
+        return { bankConnections: [], inboxAccounts: [] };
+      }
+
+      if (isLocalDesktopRuntime()) {
         return { bankConnections: [], inboxAccounts: [] };
       }
 

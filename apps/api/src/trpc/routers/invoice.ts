@@ -44,11 +44,17 @@ import {
   searchInvoiceNumber,
   updateInvoice,
 } from "@midday/db/queries";
+import {
+  getLocalTeamById,
+  getLocalUserById,
+  getSeededLocalDb,
+} from "@midday/db/local-queries";
 import { DEFAULT_TEMPLATE } from "@midday/invoice";
 import { verify } from "@midday/invoice/token";
 import { transformCustomerToContent } from "@midday/invoice/utils";
 import { decodeJobId, getQueue, triggerJob } from "@midday/job-client";
 import { createLoggerWithContext } from "@midday/logger";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 import { TRPCError } from "@trpc/server";
 import { addDays, format, parseISO } from "date-fns";
 import { v4 as uuidv4 } from "uuid";
@@ -278,6 +284,112 @@ export const invoiceRouter = createTRPCRouter({
 
   defaultSettings: protectedProcedure.query(
     async ({ ctx: { db, teamId, session, geo } }) => {
+      if (isLocalDesktopRuntime()) {
+        const local = getSeededLocalDb();
+        const team = getLocalTeamById(local, teamId!);
+        const user = getLocalUserById(local, session.user.id);
+        const locale = user?.locale ?? geo?.locale ?? "en";
+        const timezone =
+          user?.timezone ?? geo?.timezone ?? "America/New_York";
+        const currency = team?.baseCurrency ?? defaultTemplate.currency;
+        const dateFormat = user?.dateFormat ?? defaultTemplate.dateFormat;
+        const logoUrl = defaultTemplate.logoUrl;
+        const countryCode = geo?.country ?? "US";
+        const size = ["US", "CA"].includes(countryCode) ? "letter" : "a4";
+        const includeTax = ["US", "CA", "AU", "NZ", "SG", "MY", "IN"].includes(
+          countryCode,
+        );
+        const savedTemplate = {
+          id: undefined,
+          name: "Default",
+          isDefault: true,
+          title: defaultTemplate.title,
+          logoUrl,
+          currency,
+          size: defaultTemplate.size,
+          includeTax,
+          includeVat: !includeTax,
+          includeDiscount: defaultTemplate.includeDiscount,
+          includeDecimals: defaultTemplate.includeDecimals,
+          includeUnits: defaultTemplate.includeUnits,
+          includeQr: defaultTemplate.includeQr,
+          includeLineItemTax: defaultTemplate.includeLineItemTax,
+          lineItemTaxLabel: defaultTemplate.lineItemTaxLabel,
+          includePdf: defaultTemplate.includePdf,
+          sendCopy: defaultTemplate.sendCopy,
+          customerLabel: defaultTemplate.customerLabel,
+          fromLabel: defaultTemplate.fromLabel,
+          invoiceNoLabel: defaultTemplate.invoiceNoLabel,
+          subtotalLabel: defaultTemplate.subtotalLabel,
+          issueDateLabel: defaultTemplate.issueDateLabel,
+          totalSummaryLabel: defaultTemplate.totalSummaryLabel,
+          dueDateLabel: defaultTemplate.dueDateLabel,
+          discountLabel: defaultTemplate.discountLabel,
+          descriptionLabel: defaultTemplate.descriptionLabel,
+          priceLabel: defaultTemplate.priceLabel,
+          quantityLabel: defaultTemplate.quantityLabel,
+          totalLabel: defaultTemplate.totalLabel,
+          vatLabel: defaultTemplate.vatLabel,
+          taxLabel: defaultTemplate.taxLabel,
+          paymentLabel: defaultTemplate.paymentLabel,
+          noteLabel: defaultTemplate.noteLabel,
+          dateFormat,
+          deliveryType: defaultTemplate.deliveryType,
+          taxRate: defaultTemplate.taxRate,
+          vatRate: defaultTemplate.vatRate,
+          fromDetails: defaultTemplate.fromDetails,
+          paymentDetails: defaultTemplate.paymentDetails,
+          noteDetails: defaultTemplate.noteDetails,
+          timezone,
+          locale,
+          paymentEnabled: defaultTemplate.paymentEnabled,
+          paymentTermsDays: defaultTemplate.paymentTermsDays,
+          emailSubject: null,
+          emailHeading: null,
+          emailBody: null,
+          emailButtonText: null,
+        };
+
+        const paymentTermsDays = savedTemplate.paymentTermsDays ?? 30;
+
+        return {
+          id: uuidv4(),
+          currency,
+          status: "draft",
+          size,
+          includeTax: savedTemplate.includeTax,
+          includeVat: savedTemplate.includeVat,
+          includeDiscount: false,
+          includeDecimals: false,
+          includePdf: false,
+          sendCopy: false,
+          includeUnits: false,
+          includeQr: true,
+          invoiceNumber: "INV-0001",
+          timezone,
+          locale,
+          fromDetails: savedTemplate.fromDetails,
+          paymentDetails: savedTemplate.paymentDetails,
+          customerDetails: undefined,
+          noteDetails: savedTemplate.noteDetails,
+          customerId: undefined,
+          issueDate: new UTCDate().toISOString(),
+          dueDate: addDays(new UTCDate(), paymentTermsDays).toISOString(),
+          lineItems: [{ name: "", quantity: 0, price: 0, vat: 0 }],
+          tax: undefined,
+          token: undefined,
+          discount: undefined,
+          subtotal: undefined,
+          topBlock: undefined,
+          bottomBlock: undefined,
+          amount: undefined,
+          customerName: undefined,
+          logoUrl: undefined,
+          vat: undefined,
+          template: savedTemplate,
+        };
+      }
+
       // Fetch invoice number, template, and team details concurrently
       const [nextInvoiceNumber, template, team, user] = await Promise.all([
         getNextInvoiceNumber(db, teamId!),
