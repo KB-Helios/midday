@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,6 +144,134 @@ pub async fn wait_for_url(
     Err(LocalServiceError::Timeout { service, url })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceCommand {
+    pub program: String,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+fn port_from_url(url: &str, fallback: &str) -> String {
+    url.rsplit(':')
+        .next()
+        .and_then(|part| part.split('/').next())
+        .filter(|part| part.chars().all(|ch| ch.is_ascii_digit()))
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+pub fn dashboard_dev_command(config: &LocalServiceConfig) -> ServiceCommand {
+    ServiceCommand {
+        program: "bun".to_string(),
+        args: vec!["run".to_string(), "dev:dashboard".to_string()],
+        env: vec![
+            ("NEXT_PUBLIC_API_URL".to_string(), config.api_url.clone()),
+            ("API_INTERNAL_URL".to_string(), config.api_url.clone()),
+        ],
+    }
+}
+
+pub fn api_dev_command(config: &LocalServiceConfig) -> ServiceCommand {
+    ServiceCommand {
+        program: "bun".to_string(),
+        args: vec!["run".to_string(), "dev:api".to_string()],
+        env: vec![
+            ("PORT".to_string(), port_from_url(&config.api_url, "3003")),
+            (
+                "ALLOWED_API_ORIGINS".to_string(),
+                config.dashboard_url.clone(),
+            ),
+        ],
+    }
+}
+
+pub struct LocalServiceManager {
+    config: LocalServiceConfig,
+    children: Vec<Child>,
+}
+
+impl LocalServiceManager {
+    pub fn new(config: LocalServiceConfig) -> Self {
+        Self {
+            config,
+            children: Vec::new(),
+        }
+    }
+
+    pub fn dashboard_url(&self) -> &str {
+        &self.config.dashboard_url
+    }
+
+    pub fn config(&self) -> &LocalServiceConfig {
+        &self.config
+    }
+
+    pub fn start_dev_services(&mut self, repo_root: PathBuf) -> Result<(), String> {
+        if self.config.mode == DesktopRuntimeMode::Remote || !self.config.manage_processes {
+            return Ok(());
+        }
+
+        self.children.push(spawn_service(
+            repo_root.clone(),
+            api_dev_command(&self.config),
+        )?);
+        self.children.push(spawn_service(
+            repo_root,
+            dashboard_dev_command(&self.config),
+        )?);
+
+        Ok(())
+    }
+
+    pub async fn wait_until_ready(&self) -> Result<(), String> {
+        if let Some(url) = api_health_url(&self.config) {
+            wait_for_url("api", url, Duration::from_secs(45))
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+
+        if let Some(url) = dashboard_health_url(&self.config) {
+            wait_for_url("dashboard", url, Duration::from_secs(90))
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+
+        Ok(())
+    }
+
+    pub fn shutdown(&mut self) {
+        for child in &mut self.children {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        self.children.clear();
+    }
+}
+
+impl Drop for LocalServiceManager {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+fn spawn_service(repo_root: PathBuf, command: ServiceCommand) -> Result<Child, String> {
+    let mut process = Command::new(&command.program);
+    process
+        .args(&command.args)
+        .current_dir(repo_root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    for (key, value) in command.env {
+        process.env(key, value);
+    }
+
+    process
+        .spawn()
+        .map_err(|error| format!("failed to spawn {}: {}", command.program, error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +343,38 @@ mod tests {
 
         assert_eq!(api_health_url(&config), None);
         assert_eq!(dashboard_health_url(&config), None);
+    }
+
+    #[test]
+    fn builds_dashboard_dev_command() {
+        let command = dashboard_dev_command(&resolve_config_from_env(&env(&[])));
+
+        assert_eq!(command.program, "bun");
+        assert_eq!(command.args, vec!["run", "dev:dashboard"]);
+        assert!(command.env.iter().any(|(key, value)| {
+            key == "NEXT_PUBLIC_API_URL" && value == "http://localhost:3003"
+        }));
+        assert!(
+            command.env.iter().any(|(key, value)| {
+                key == "API_INTERNAL_URL" && value == "http://localhost:3003"
+            })
+        );
+    }
+
+    #[test]
+    fn builds_api_dev_command() {
+        let command = api_dev_command(&resolve_config_from_env(&env(&[])));
+
+        assert_eq!(command.program, "bun");
+        assert_eq!(command.args, vec!["run", "dev:api"]);
+        assert!(
+            command
+                .env
+                .iter()
+                .any(|(key, value)| key == "PORT" && value == "3003")
+        );
+        assert!(command.env.iter().any(|(key, value)| {
+            key == "ALLOWED_API_ORIGINS" && value == "http://localhost:3001"
+        }));
     }
 }
