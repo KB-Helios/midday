@@ -1,17 +1,20 @@
 import { createLoggerWithContext } from "@midday/logger";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import type { Database } from "./client";
+import { closeLocalDb, getLocalDb } from "./local/client";
 import * as schema from "./schema";
 
 const isDevelopment = process.env.NODE_ENV === "development";
 const logger = createLoggerWithContext("db:worker");
 const DB_POOL_EVENT_LOGGING = process.env.DB_POOL_EVENT_LOGGING === "true";
+const isLocalRuntime = isLocalDesktopRuntime();
 
 const connectionString =
   process.env.DATABASE_PRIMARY_POOLER_URL ?? process.env.DATABASE_PRIMARY_URL;
 
-if (!connectionString) {
+if (!isLocalRuntime && !connectionString) {
   throw new Error(
     "Missing database connection string: set DATABASE_PRIMARY_POOLER_URL or DATABASE_PRIMARY_URL",
   );
@@ -20,17 +23,19 @@ if (!connectionString) {
 /**
  * Worker database client with connection pool optimized for BullMQ concurrent jobs
  */
-const workerPool = new Pool({
-  connectionString,
-  max: isDevelopment ? 10 : 50,
-  idleTimeoutMillis: isDevelopment ? 5000 : 60000,
-  connectionTimeoutMillis: 15000,
-  maxUses: isDevelopment ? 200 : 3000,
-  keepAlive: true,
-  keepAliveInitialDelayMillis: 10_000,
-  ssl: isDevelopment ? false : { rejectUnauthorized: false },
-  allowExitOnIdle: true,
-});
+const workerPool = isLocalRuntime
+  ? null
+  : new Pool({
+      connectionString,
+      max: isDevelopment ? 10 : 50,
+      idleTimeoutMillis: isDevelopment ? 5000 : 60000,
+      connectionTimeoutMillis: 15000,
+      maxUses: isDevelopment ? 200 : 3000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10_000,
+      ssl: isDevelopment ? false : { rejectUnauthorized: false },
+      allowExitOnIdle: true,
+    });
 
 function getPgErrorDetails(error: unknown) {
   const details: Record<string, unknown> = {};
@@ -61,6 +66,14 @@ function getPgErrorDetails(error: unknown) {
 }
 
 function getPoolStatsSnapshot() {
+  if (!workerPool) {
+    return {
+      total: 0,
+      idle: 0,
+      waiting: 0,
+    };
+  }
+
   return {
     total: workerPool.totalCount,
     idle: workerPool.idleCount,
@@ -68,59 +81,69 @@ function getPoolStatsSnapshot() {
   };
 }
 
-workerPool.on("error", (err) => {
-  logger.error("Worker pool: idle client error", {
-    ...getPgErrorDetails(err),
-    stats: getPoolStatsSnapshot(),
-  });
-});
-
-if (DB_POOL_EVENT_LOGGING) {
-  workerPool.on("connect", () => {
-    logger.info("Worker pool: client connected", {
+if (workerPool) {
+  workerPool.on("error", (err) => {
+    logger.error("Worker pool: idle client error", {
+      ...getPgErrorDetails(err),
       stats: getPoolStatsSnapshot(),
     });
   });
 
-  workerPool.on("acquire", () => {
-    logger.info("Worker pool: client acquired", {
-      stats: getPoolStatsSnapshot(),
+  if (DB_POOL_EVENT_LOGGING) {
+    workerPool.on("connect", () => {
+      logger.info("Worker pool: client connected", {
+        stats: getPoolStatsSnapshot(),
+      });
     });
-  });
 
-  workerPool.on("remove", () => {
-    logger.info("Worker pool: client removed", {
-      stats: getPoolStatsSnapshot(),
+    workerPool.on("acquire", () => {
+      logger.info("Worker pool: client acquired", {
+        stats: getPoolStatsSnapshot(),
+      });
     });
-  });
+
+    workerPool.on("remove", () => {
+      logger.info("Worker pool: client removed", {
+        stats: getPoolStatsSnapshot(),
+      });
+    });
+  }
 }
 
-const workerDrizzle = drizzle(workerPool, {
-  schema,
-  casing: "snake_case",
-});
+const workerDrizzle = workerPool
+  ? drizzle(workerPool, {
+      schema,
+      casing: "snake_case",
+    })
+  : null;
 
 // Shared query helpers call `db.executeOnReplica(...)`. Workers don't use
 // replicas, so route those reads through the primary pool via the normal
 // drizzle `execute` and return the rows in the same shape replicas.ts does.
-const workerDb = Object.assign(workerDrizzle, {
-  executeOnReplica: async <
-    TRow extends Record<string, unknown> = Record<string, unknown>,
-  >(
-    query: Parameters<typeof workerDrizzle.execute>[0],
-  ): Promise<TRow[]> => {
-    const result = await workerDrizzle.execute(query);
-    if (Array.isArray(result)) {
-      return result as TRow[];
-    }
-    return (result as { rows: TRow[] }).rows;
-  },
-});
+const workerDb = workerDrizzle
+  ? Object.assign(workerDrizzle, {
+      executeOnReplica: async <
+        TRow extends Record<string, unknown> = Record<string, unknown>,
+      >(
+        query: Parameters<typeof workerDrizzle.execute>[0],
+      ): Promise<TRow[]> => {
+        const result = await workerDrizzle.execute(query);
+        if (Array.isArray(result)) {
+          return result as TRow[];
+        }
+        return (result as { rows: TRow[] }).rows;
+      },
+    })
+  : null;
 
 /**
  * Get the shared worker database instance
  */
 export const getWorkerDb = (): Database => {
+  if (isLocalRuntime) {
+    return getLocalDb().db as unknown as Database;
+  }
+
   return workerDb as unknown as Database;
 };
 
@@ -132,5 +155,10 @@ export const getWorkerPoolStats = () => {
  * Cleanup function to close database connections gracefully
  */
 export const closeWorkerDb = async (): Promise<void> => {
-  await workerPool.end();
+  if (isLocalRuntime) {
+    closeLocalDb();
+    return;
+  }
+
+  await workerPool?.end();
 };
