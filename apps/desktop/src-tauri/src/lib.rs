@@ -14,6 +14,8 @@ use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use image;
 
+pub mod local_services;
+
 // Global state for search window availability
 type SearchWindowState = Arc<Mutex<bool>>;
 
