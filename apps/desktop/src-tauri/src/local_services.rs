@@ -41,7 +41,7 @@ pub fn resolve_config_from_env(env: &HashMap<String, String>) -> LocalServiceCon
     let manage_processes = env
         .get("MIDDAY_DESKTOP_MANAGE_SERVICES")
         .map(|value| value != "false" && value != "0")
-        .unwrap_or(true);
+        .unwrap_or(cfg!(debug_assertions));
 
     LocalServiceConfig {
         mode: DesktopRuntimeMode::Local,
