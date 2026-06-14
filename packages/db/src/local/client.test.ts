@@ -7,6 +7,7 @@ import {
   closeLocalDb,
   connectLocalDb,
   getLocalDbFilePath,
+  getLocalDb,
   seedLocalWorkspace,
 } from "./client";
 import { migrateLocalDb } from "./migrations";
@@ -92,6 +93,23 @@ describe("connectLocalDb", () => {
       local.close();
     }
   });
+
+  test("opens a new singleton after the previous singleton was closed directly", () => {
+    const cwd = createTempDir();
+    const path = join(cwd, "state", "midday.sqlite");
+    const first = getLocalDb({ path });
+
+    first.close();
+
+    const second = getLocalDb({ path });
+
+    try {
+      expect(second).not.toBe(first);
+      expect(second.db.select().from(localUsers).all()).toEqual([]);
+    } finally {
+      second.close();
+    }
+  });
 });
 
 describe("seedLocalWorkspace", () => {
@@ -132,6 +150,26 @@ describe("seedLocalWorkspace", () => {
       expect(teams[0]?.name).toBe("Renamed Team");
       expect(sessions).toHaveLength(1);
       expect(sessions[0]?.token).toBe("session_token");
+    } finally {
+      local.close();
+    }
+  });
+
+  test("is idempotent with default local workspace values", () => {
+    const cwd = createTempDir();
+    const local = connectLocalDb({ path: join(cwd, "midday.sqlite") });
+
+    try {
+      const first = seedLocalWorkspace(local);
+      const second = seedLocalWorkspace(local);
+      const users = local.db.select().from(localUsers).all();
+      const teams = local.db.select().from(localTeams).all();
+      const sessions = local.db.select().from(localSessions).all();
+
+      expect(second).toEqual(first);
+      expect(users).toHaveLength(1);
+      expect(teams).toHaveLength(1);
+      expect(sessions).toHaveLength(1);
     } finally {
       local.close();
     }

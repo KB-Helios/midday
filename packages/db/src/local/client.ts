@@ -1,11 +1,14 @@
 import { Database as BunDatabase } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { nanoid } from "nanoid";
 import { migrateLocalDb, type LocalMigrationResult } from "./migrations";
 import { resolveLocalDbPath, type ResolveLocalDbPathOptions } from "./path";
 import * as schema from "./schema";
 
 type LocalDbEnv = ResolveLocalDbPathOptions["env"];
+
+const DEFAULT_LOCAL_USER_ID = "local_user";
+const DEFAULT_LOCAL_TEAM_ID = "local_team";
+const DEFAULT_LOCAL_SESSION_TOKEN = "local_session";
 
 export type ConnectLocalDbOptions = {
   cwd?: string;
@@ -77,15 +80,28 @@ export function connectLocalDb(
 ): LocalDatabase {
   const path = getLocalDbFilePath(options);
   const sqlite = new BunDatabase(path, { create: true, readwrite: true });
+  let closed = false;
+  let local: LocalDatabase;
 
   configureSqlite(sqlite);
 
-  const local: LocalDatabase = {
+  local = {
     db: createDrizzleClient(sqlite),
     migrate: () => migrateLocalDb(sqlite),
     path,
     sqlite,
-    close: () => sqlite.close(),
+    close: () => {
+      if (closed) {
+        return;
+      }
+
+      sqlite.close();
+      closed = true;
+
+      if (localDb === local) {
+        localDb = undefined;
+      }
+    },
   };
 
   local.migrate();
@@ -106,11 +122,11 @@ export function seedLocalWorkspace(
   local: LocalDatabase,
   input: SeedLocalWorkspaceInput = {},
 ): SeedLocalWorkspaceResult {
-  const userId = input.userId ?? `local_user_${nanoid(12)}`;
-  const teamId = input.teamId ?? `local_team_${nanoid(12)}`;
+  const userId = input.userId ?? DEFAULT_LOCAL_USER_ID;
+  const teamId = input.teamId ?? DEFAULT_LOCAL_TEAM_ID;
   const sessionToken =
     input.sessionToken === undefined
-      ? `local_session_${nanoid(32)}`
+      ? DEFAULT_LOCAL_SESSION_TOKEN
       : input.sessionToken;
   const now = toIsoString(input.now) ?? new Date().toISOString();
   const expiresAt = toIsoString(input.expiresAt);
