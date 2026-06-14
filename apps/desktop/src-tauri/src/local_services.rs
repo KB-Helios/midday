@@ -117,7 +117,7 @@ impl std::fmt::Display for LocalServiceError {
 impl std::error::Error for LocalServiceError {}
 
 fn is_ready(url: &str) -> Result<bool, String> {
-    match ureq::get(url).call() {
+    match ureq::get(url).timeout(Duration::from_secs(2)).call() {
         Ok(response) => Ok((200..500).contains(&response.status())),
         Err(ureq::Error::Status(status, _)) => Ok((200..500).contains(&status)),
         Err(error) => Err(error.to_string()),
