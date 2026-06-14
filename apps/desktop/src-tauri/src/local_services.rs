@@ -61,6 +61,15 @@ pub fn current_env() -> HashMap<String, String> {
     std::env::vars().collect()
 }
 
+pub fn repo_root_from_manifest() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .and_then(|path| path.parent())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 pub fn api_health_url(config: &LocalServiceConfig) -> Option<String> {
     match config.mode {
         DesktopRuntimeMode::Local => {
@@ -376,5 +385,13 @@ mod tests {
         assert!(command.env.iter().any(|(key, value)| {
             key == "ALLOWED_API_ORIGINS" && value == "http://localhost:3001"
         }));
+    }
+
+    #[test]
+    fn repo_root_from_manifest_points_to_workspace_root() {
+        let root = repo_root_from_manifest();
+
+        assert!(root.join("apps").join("desktop").exists());
+        assert!(root.join("packages").exists());
     }
 }

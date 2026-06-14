@@ -1,6 +1,5 @@
 use image;
 use serde_json;
-use std::env;
 use std::sync::{Arc, Mutex};
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
@@ -282,7 +281,7 @@ async fn create_preloaded_search_window(
     let search_window_label = "search";
     let search_url = format!("{}/desktop/search", app_url);
 
-    let mut search_builder = WebviewWindowBuilder::new(
+    let search_builder = WebviewWindowBuilder::new(
         app,
         search_window_label,
         WebviewUrl::External(tauri::Url::parse(&search_url)?),
@@ -303,11 +302,9 @@ async fn create_preloaded_search_window(
 
     // Platform-specific styling
     #[cfg(target_os = "macos")]
-    {
-        search_builder = search_builder
-            .hidden_title(true)
-            .title_bar_style(TitleBarStyle::Overlay);
-    }
+    let search_builder = search_builder
+        .hidden_title(true)
+        .title_bar_style(TitleBarStyle::Overlay);
 
     let search_window = search_builder.shadow(false).build()?;
 
@@ -345,38 +342,10 @@ async fn create_preloaded_search_window(
 }
 
 fn get_app_url() -> String {
-    // Try runtime environment variable first, then fall back to compile-time
-    let env = env::var("MIDDAY_ENV").unwrap_or_else(|_| {
-        option_env!("MIDDAY_ENV")
-            .unwrap_or("development")
-            .to_string()
-    });
-
-    println!("🌍 Environment detected: {}", env);
-
-    match env.as_str() {
-        "development" | "dev" => {
-            let url = "http://localhost:3001".to_string();
-            println!("🌍 Using development URL: {}", url);
-            url
-        }
-        "staging" => {
-            let url = "https://beta.midday.ai".to_string();
-            println!("🌍 Using staging URL: {}", url);
-            url
-        }
-        "production" | "prod" => {
-            let url = "https://app.midday.ai".to_string();
-            println!("🌍 Using production URL: {}", url);
-            url
-        }
-        _ => {
-            eprintln!("Unknown environment: {}, defaulting to development", env);
-            let url = "http://localhost:3001".to_string();
-            println!("🌍 Using fallback development URL: {}", url);
-            url
-        }
-    }
+    let config = local_services::resolve_config_from_env(&local_services::current_env());
+    println!("🌍 Desktop runtime: {:?}", config.mode);
+    println!("🌍 Dashboard URL: {}", config.dashboard_url);
+    config.dashboard_url
 }
 
 fn is_external_url(url: &str, app_url: &str) -> bool {
@@ -457,6 +426,37 @@ pub fn run() {
                 });
             }
 
+            let local_config =
+                local_services::resolve_config_from_env(&local_services::current_env());
+            let mut local_manager = local_services::LocalServiceManager::new(local_config.clone());
+
+            if local_config.manage_processes {
+                local_manager
+                    .start_dev_services(local_services::repo_root_from_manifest())
+                    .map_err(|error| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("Failed to start local services: {error}"),
+                        )
+                    })?;
+            }
+
+            if matches!(
+                local_config.mode,
+                local_services::DesktopRuntimeMode::Local
+            ) {
+                tauri::async_runtime::block_on(local_manager.wait_until_ready()).map_err(
+                    |error| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("Local services were not ready: {error}"),
+                        )
+                    },
+                )?;
+            }
+
+            app.manage(Mutex::new(local_manager));
+
             let app_url_clone = app_url.clone();
             let app_handle = app.handle().clone();
 
@@ -534,7 +534,7 @@ pub fn run() {
                 handle_deep_link_event(&app_handle_for_deep_links, url_strings);
             });
 
-            let mut win_builder = WebviewWindowBuilder::new(
+            let win_builder = WebviewWindowBuilder::new(
                 app,
                 "main",
                 WebviewUrl::External(tauri::Url::parse(&app_url).unwrap()),
@@ -549,11 +549,9 @@ pub fn run() {
             .shadow(true);
 
             #[cfg(target_os = "macos")]
-            {
-                win_builder = win_builder
-                    .hidden_title(true)
-                    .title_bar_style(TitleBarStyle::Overlay);
-            }
+            let win_builder = win_builder
+                .hidden_title(true)
+                .title_bar_style(TitleBarStyle::Overlay);
 
             let win_builder = win_builder
             .disable_drag_drop_handler()
