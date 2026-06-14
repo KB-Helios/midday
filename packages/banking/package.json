@@ -20,6 +20,7 @@
     "@midday/cache": "workspace:*",
     "@midday/location": "workspace:*",
     "@midday/logger": "workspace:*",
+    "@midday/utils": "workspace:*",
     "@t3-oss/env-core": "^0.13.11",
     "axios": "^1.14.0",
     "change-case": "catalog:",
