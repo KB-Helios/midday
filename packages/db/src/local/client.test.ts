@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { Database as BunDatabase } from "bun:sqlite";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { migrateLocalDb } from "./migrations";
 import { resolveLocalDbPath } from "./path";
 
 const tempDirs: string[] = [];
@@ -55,5 +57,53 @@ describe("resolveLocalDbPath", () => {
 
     expect(dbPath).toBe(join(desktopDataDir, "midday.sqlite"));
     expect(existsSync(dirname(dbPath))).toBe(true);
+  });
+});
+
+describe("migrateLocalDb", () => {
+  test("creates the local bootstrap tables and records the migration", () => {
+    const cwd = createTempDir();
+    const sqlite = new BunDatabase(join(cwd, "midday.sqlite"), {
+      create: true,
+      readwrite: true,
+    });
+
+    try {
+      const result = migrateLocalDb(sqlite);
+      const tables = sqlite
+        .query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        .all() as Array<{ name: string }>;
+      const versions = sqlite
+        .query("SELECT version FROM local_migrations ORDER BY version")
+        .all() as Array<{ version: number }>;
+
+      expect(result.applied).toEqual([1]);
+      expect(tables.map((table) => table.name)).toContain("local_meta");
+      expect(tables.map((table) => table.name)).toContain("local_sessions");
+      expect(versions).toEqual([{ version: 1 }]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("is idempotent after migrations have already run", () => {
+    const cwd = createTempDir();
+    const sqlite = new BunDatabase(join(cwd, "midday.sqlite"), {
+      create: true,
+      readwrite: true,
+    });
+
+    try {
+      migrateLocalDb(sqlite);
+      const result = migrateLocalDb(sqlite);
+      const versions = sqlite
+        .query("SELECT version FROM local_migrations ORDER BY version")
+        .all() as Array<{ version: number }>;
+
+      expect(result.applied).toEqual([]);
+      expect(versions).toEqual([{ version: 1 }]);
+    } finally {
+      sqlite.close();
+    }
   });
 });
