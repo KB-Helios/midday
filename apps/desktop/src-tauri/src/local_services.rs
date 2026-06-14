@@ -169,28 +169,49 @@ fn port_from_url(url: &str, fallback: &str) -> String {
         .to_string()
 }
 
+fn local_runtime_env() -> Vec<(String, String)> {
+    vec![
+        ("MIDDAY_DESKTOP_RUNTIME".to_string(), "local".to_string()),
+        ("MIDDAY_LOCAL_FIRST".to_string(), "true".to_string()),
+    ]
+}
+
 pub fn dashboard_dev_command(config: &LocalServiceConfig) -> ServiceCommand {
+    let mut env = local_runtime_env();
+    env.extend([
+        (
+            "NEXT_PUBLIC_MIDDAY_DESKTOP_RUNTIME".to_string(),
+            "local".to_string(),
+        ),
+        (
+            "NEXT_PUBLIC_MIDDAY_LOCAL_FIRST".to_string(),
+            "true".to_string(),
+        ),
+        ("NEXT_PUBLIC_API_URL".to_string(), config.api_url.clone()),
+        ("API_INTERNAL_URL".to_string(), config.api_url.clone()),
+    ]);
+
     ServiceCommand {
         program: "bun".to_string(),
         args: vec!["run".to_string(), "dev:dashboard".to_string()],
-        env: vec![
-            ("NEXT_PUBLIC_API_URL".to_string(), config.api_url.clone()),
-            ("API_INTERNAL_URL".to_string(), config.api_url.clone()),
-        ],
+        env,
     }
 }
 
 pub fn api_dev_command(config: &LocalServiceConfig) -> ServiceCommand {
+    let mut env = local_runtime_env();
+    env.extend([
+        ("PORT".to_string(), port_from_url(&config.api_url, "3003")),
+        (
+            "ALLOWED_API_ORIGINS".to_string(),
+            config.dashboard_url.clone(),
+        ),
+    ]);
+
     ServiceCommand {
         program: "bun".to_string(),
         args: vec!["run".to_string(), "dev:api".to_string()],
-        env: vec![
-            ("PORT".to_string(), port_from_url(&config.api_url, "3003")),
-            (
-                "ALLOWED_API_ORIGINS".to_string(),
-                config.dashboard_url.clone(),
-            ),
-        ],
+        env,
     }
 }
 
@@ -360,6 +381,24 @@ mod tests {
 
         assert_eq!(command.program, "bun");
         assert_eq!(command.args, vec!["run", "dev:dashboard"]);
+        assert!(
+            command
+                .env
+                .iter()
+                .any(|(key, value)| key == "MIDDAY_DESKTOP_RUNTIME" && value == "local")
+        );
+        assert!(
+            command
+                .env
+                .iter()
+                .any(|(key, value)| key == "MIDDAY_LOCAL_FIRST" && value == "true")
+        );
+        assert!(command.env.iter().any(|(key, value)| {
+            key == "NEXT_PUBLIC_MIDDAY_DESKTOP_RUNTIME" && value == "local"
+        }));
+        assert!(command.env.iter().any(|(key, value)| {
+            key == "NEXT_PUBLIC_MIDDAY_LOCAL_FIRST" && value == "true"
+        }));
         assert!(command.env.iter().any(|(key, value)| {
             key == "NEXT_PUBLIC_API_URL" && value == "http://localhost:3003"
         }));
@@ -376,6 +415,18 @@ mod tests {
 
         assert_eq!(command.program, "bun");
         assert_eq!(command.args, vec!["run", "dev:api"]);
+        assert!(
+            command
+                .env
+                .iter()
+                .any(|(key, value)| key == "MIDDAY_DESKTOP_RUNTIME" && value == "local")
+        );
+        assert!(
+            command
+                .env
+                .iter()
+                .any(|(key, value)| key == "MIDDAY_LOCAL_FIRST" && value == "true")
+        );
         assert!(
             command
                 .env
