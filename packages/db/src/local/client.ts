@@ -1,14 +1,15 @@
 import { Database as BunDatabase } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
+import {
+  LOCAL_DESKTOP_SESSION_TOKEN,
+  LOCAL_DESKTOP_TEAM_ID,
+  LOCAL_DESKTOP_USER_ID,
+} from "@midday/utils/envs";
 import { migrateLocalDb, type LocalMigrationResult } from "./migrations";
 import { resolveLocalDbPath, type ResolveLocalDbPathOptions } from "./path";
 import * as schema from "./schema";
 
 type LocalDbEnv = ResolveLocalDbPathOptions["env"];
-
-const DEFAULT_LOCAL_USER_ID = "local_user";
-const DEFAULT_LOCAL_TEAM_ID = "local_team";
-const DEFAULT_LOCAL_SESSION_TOKEN = "local_session";
 
 export type ConnectLocalDbOptions = {
   cwd?: string;
@@ -122,11 +123,11 @@ export function seedLocalWorkspace(
   local: LocalDatabase,
   input: SeedLocalWorkspaceInput = {},
 ): SeedLocalWorkspaceResult {
-  const userId = input.userId ?? DEFAULT_LOCAL_USER_ID;
-  const teamId = input.teamId ?? DEFAULT_LOCAL_TEAM_ID;
+  const userId = input.userId ?? LOCAL_DESKTOP_USER_ID;
+  const teamId = input.teamId ?? LOCAL_DESKTOP_TEAM_ID;
   const sessionToken =
     input.sessionToken === undefined
-      ? DEFAULT_LOCAL_SESSION_TOKEN
+      ? LOCAL_DESKTOP_SESSION_TOKEN
       : input.sessionToken;
   const now = toIsoString(input.now) ?? new Date().toISOString();
   const expiresAt = toIsoString(input.expiresAt);
