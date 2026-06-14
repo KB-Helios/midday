@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopRuntimeMode {
@@ -58,6 +59,89 @@ pub fn current_env() -> HashMap<String, String> {
     std::env::vars().collect()
 }
 
+pub fn api_health_url(config: &LocalServiceConfig) -> Option<String> {
+    match config.mode {
+        DesktopRuntimeMode::Local => {
+            Some(format!("{}/health", config.api_url.trim_end_matches('/')))
+        }
+        DesktopRuntimeMode::Remote => None,
+    }
+}
+
+pub fn dashboard_health_url(config: &LocalServiceConfig) -> Option<String> {
+    match config.mode {
+        DesktopRuntimeMode::Local => Some(config.dashboard_url.trim_end_matches('/').to_string()),
+        DesktopRuntimeMode::Remote => None,
+    }
+}
+
+#[derive(Debug)]
+pub enum LocalServiceError {
+    Timeout {
+        service: &'static str,
+        url: String,
+    },
+    Request {
+        service: &'static str,
+        url: String,
+        message: String,
+    },
+}
+
+impl std::fmt::Display for LocalServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LocalServiceError::Timeout { service, url } => {
+                write!(f, "{service} did not become ready at {url}")
+            }
+            LocalServiceError::Request {
+                service,
+                url,
+                message,
+            } => write!(f, "{service} health request failed at {url}: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for LocalServiceError {}
+
+fn is_ready(url: &str) -> Result<bool, String> {
+    match ureq::get(url).call() {
+        Ok(response) => Ok((200..500).contains(&response.status())),
+        Err(ureq::Error::Status(status, _)) => Ok((200..500).contains(&status)),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+pub async fn wait_for_url(
+    service: &'static str,
+    url: String,
+    timeout: Duration,
+) -> Result<(), LocalServiceError> {
+    let start = Instant::now();
+    let mut last_error: Option<String> = None;
+
+    while start.elapsed() < timeout {
+        match is_ready(&url) {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(message) => last_error = Some(message),
+        }
+
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    if let Some(message) = last_error {
+        return Err(LocalServiceError::Request {
+            service,
+            url,
+            message,
+        });
+    }
+
+    Err(LocalServiceError::Timeout { service, url })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +188,30 @@ mod tests {
         assert_eq!(config.dashboard_url, "https://app.midday.ai");
         assert_eq!(config.api_url, "https://api.midday.ai");
         assert!(!config.manage_processes);
+    }
+
+    #[test]
+    fn builds_health_urls_for_local_services() {
+        let config = resolve_config_from_env(&env(&[]));
+
+        assert_eq!(
+            api_health_url(&config),
+            Some("http://localhost:3003/health".to_string())
+        );
+        assert_eq!(
+            dashboard_health_url(&config),
+            Some("http://localhost:3001".to_string())
+        );
+    }
+
+    #[test]
+    fn remote_runtime_has_no_local_health_urls() {
+        let config = resolve_config_from_env(&env(&[
+            ("MIDDAY_DESKTOP_RUNTIME", "remote"),
+            ("MIDDAY_REMOTE_APP_URL", "https://app.midday.ai"),
+        ]));
+
+        assert_eq!(api_health_url(&config), None);
+        assert_eq!(dashboard_health_url(&config), None);
     }
 }
