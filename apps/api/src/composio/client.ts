@@ -39,7 +39,12 @@ function localComposioFetch<T>(path: string): T {
 
   const toolkitMatch = path.match(/^\/toolkits\/([^/?]+)/);
   if (toolkitMatch) {
-    const slug = decodeURIComponent(toolkitMatch[1] ?? "local");
+    let slug: string;
+    try {
+      slug = decodeURIComponent(toolkitMatch[1] ?? "local");
+    } catch {
+      slug = "local";
+    }
 
     return {
       slug,

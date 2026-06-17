@@ -123,7 +123,7 @@ function toLocalTeam(row: LocalTeamRow): LocalTeamProfile {
 }
 
 function toLocalTeamRole(role: string | null | undefined): LocalTeamRole {
-  return role === "member" ? "member" : "owner";
+  return role === "owner" ? "owner" : "member";
 }
 
 function getLocalTeamRow(local: LocalDatabase, teamId: string) {
@@ -242,15 +242,15 @@ export function switchLocalUserTeam(
 
   local.sqlite
     .query(
-      `UPDATE local_sessions
-      SET team_id = ?, updated_at = ?
-      WHERE token = ? AND user_id = ?`,
+      `INSERT OR REPLACE INTO local_sessions (token, user_id, team_id, expires_at, created_at, updated_at)
+      VALUES (?, ?, ?, NULL, ?, ?)`,
     )
     .run(
-      params.teamId,
-      new Date().toISOString(),
       LOCAL_DESKTOP_SESSION_TOKEN,
       params.userId,
+      params.teamId,
+      new Date().toISOString(),
+      new Date().toISOString(),
     );
 
   return {

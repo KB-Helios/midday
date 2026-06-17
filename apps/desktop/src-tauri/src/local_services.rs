@@ -170,14 +170,16 @@ fn port_from_url(url: &str, fallback: &str) -> String {
 }
 
 fn local_runtime_env() -> Vec<(String, String)> {
-    vec![
-        (
-            "FILE_KEY_SECRET".to_string(),
-            "midday-local-desktop-file-key-secret".to_string(),
-        ),
+    let mut env = vec![
         ("MIDDAY_DESKTOP_RUNTIME".to_string(), "local".to_string()),
         ("MIDDAY_LOCAL_FIRST".to_string(), "true".to_string()),
-    ]
+    ];
+
+    if let Ok(file_key_secret) = std::env::var("FILE_KEY_SECRET") {
+        env.push(("FILE_KEY_SECRET".to_string(), file_key_secret));
+    }
+
+    env
 }
 
 pub fn dashboard_dev_command(config: &LocalServiceConfig) -> ServiceCommand {
@@ -245,14 +247,24 @@ impl LocalServiceManager {
             return Ok(());
         }
 
-        self.children.push(spawn_service(
+        let api_child = spawn_service(
             repo_root.clone(),
             api_dev_command(&self.config),
-        )?);
-        self.children.push(spawn_service(
+        )?;
+
+        let dashboard_child = match spawn_service(
             repo_root,
             dashboard_dev_command(&self.config),
-        )?);
+        ) {
+            Ok(child) => child,
+            Err(e) => {
+                let _ = api_child.kill();
+                return Err(e);
+            }
+        };
+
+        self.children.push(api_child);
+        self.children.push(dashboard_child);
 
         Ok(())
     }

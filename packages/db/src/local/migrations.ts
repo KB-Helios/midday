@@ -91,7 +91,7 @@ export function migrateLocalDb(sqlite: BunDatabase): LocalMigrationResult {
       }
 
       sqlite
-        .query("INSERT INTO local_migrations (version, name) VALUES (?, ?)")
+        .query("INSERT OR IGNORE INTO local_migrations (version, name) VALUES (?, ?)")
         .run(migration.version, migration.name);
     });
 

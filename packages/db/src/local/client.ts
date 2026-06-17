@@ -84,29 +84,34 @@ export function connectLocalDb(
   let closed = false;
   let local: LocalDatabase;
 
-  configureSqlite(sqlite);
+  try {
+    configureSqlite(sqlite);
 
-  local = {
-    db: createDrizzleClient(sqlite),
-    migrate: () => migrateLocalDb(sqlite),
-    path,
-    sqlite,
-    close: () => {
-      if (closed) {
-        return;
-      }
+    local = {
+      db: createDrizzleClient(sqlite),
+      migrate: () => migrateLocalDb(sqlite),
+      path,
+      sqlite,
+      close: () => {
+        if (closed) {
+          return;
+        }
 
-      sqlite.close();
-      closed = true;
+        sqlite.close();
+        closed = true;
 
-      if (localDb === local) {
-        localDb = undefined;
-      }
-    },
-  };
+        if (localDb === local) {
+          localDb = undefined;
+        }
+      },
+    };
 
-  local.migrate();
-  return local;
+    local.migrate();
+    return local;
+  } catch (error) {
+    sqlite.close();
+    throw error;
+  }
 }
 
 export function getLocalDb(options: ConnectLocalDbOptions = {}) {

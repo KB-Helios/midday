@@ -55,17 +55,17 @@ bun run --filter @midday/desktop tauri:remote:prod
 ### Development Build
 
 ```bash
-bun run tauri:build:dev
+bun run --filter @midday/desktop tauri:build:dev
 ```
 
 ### Staging Build
 
 ```bash
-bun run tauri:build:staging
+bun run --filter @midday/desktop tauri:build:staging
 ```
 
 ### Production Build
 
 ```bash
-bun run tauri:build:prod
+bun run --filter @midday/desktop tauri:build:prod
 ```

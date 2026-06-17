@@ -74,12 +74,10 @@ function isEnabled(value: string | undefined) {
 }
 
 export function isLocalDesktopRuntime(env: LocalRuntimeEnv = process.env) {
-  const runtime =
-    env.MIDDAY_DESKTOP_RUNTIME ?? env.NEXT_PUBLIC_MIDDAY_DESKTOP_RUNTIME;
+  const runtime = env.MIDDAY_DESKTOP_RUNTIME;
 
   return (
     runtime?.toLowerCase() === "local" ||
-    isEnabled(env.MIDDAY_LOCAL_FIRST) ||
-    isEnabled(env.NEXT_PUBLIC_MIDDAY_LOCAL_FIRST)
+    isEnabled(env.MIDDAY_LOCAL_FIRST)
   );
 }
