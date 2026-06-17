@@ -52,7 +52,7 @@ afterEach(async () => {
   restoreEnv();
 });
 
-async function createLocalCaller() {
+async function createLocalCaller(options: { teamId?: string } = {}) {
   const [{ createCallerFactory }, { appRouter }] = await Promise.all([
     import("../../trpc/init"),
     import("../../trpc/routers/_app"),
@@ -75,7 +75,7 @@ async function createLocalCaller() {
     isInternalRequest: false,
     requestId: "local-desktop-test",
     session: {
-      teamId: LOCAL_DESKTOP_TEAM_ID,
+      teamId: options.teamId ?? LOCAL_DESKTOP_TEAM_ID,
       user: {
         email: "local@midday.local",
         full_name: "Local Owner",
@@ -101,6 +101,7 @@ describe("local desktop tRPC bootstrap", () => {
     expect(user).toMatchObject({
       id: LOCAL_DESKTOP_USER_ID,
       email: "local@midday.local",
+      fullName: "Local User",
       teamId: LOCAL_DESKTOP_TEAM_ID,
       team: { id: LOCAL_DESKTOP_TEAM_ID, name: "Local Workspace" },
     });
@@ -128,7 +129,67 @@ describe("local desktop tRPC bootstrap", () => {
     expect(invoiceDefaults).toMatchObject({
       currency: "USD",
       invoiceNumber: "INV-0001",
+      size: "letter",
       status: "draft",
+      template: { size: "letter" },
+    });
+  });
+
+  test("uses the requested local team from the session context", async () => {
+    const [{ getSeededLocalDb }, { seedLocalWorkspace }] = await Promise.all([
+      import("@midday/db/local-queries"),
+      import("@midday/db/local-client"),
+    ]);
+    const local = getSeededLocalDb();
+    seedLocalWorkspace(local, {
+      sessionToken: null,
+      teamId: "second_team",
+      teamName: "Second Team",
+      baseCurrency: "EUR",
+    });
+
+    const caller = await createLocalCaller({ teamId: "second_team" });
+    const team = await caller.team.current();
+
+    expect(team).toMatchObject({
+      id: "second_team",
+      name: "Second Team",
+      baseCurrency: "EUR",
+    });
+  });
+
+  test("switches to local non-uuid team ids and maps denied access", async () => {
+    const [{ getSeededLocalDb }, { seedLocalWorkspace }] = await Promise.all([
+      import("@midday/db/local-queries"),
+      import("@midday/db/local-client"),
+    ]);
+    const local = getSeededLocalDb();
+    seedLocalWorkspace(local, {
+      sessionToken: null,
+      teamId: "second_team",
+      teamName: "Second Team",
+    });
+
+    const caller = await createLocalCaller();
+
+    await expect(
+      caller.user.switchTeam({ teamId: "missing_team" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await expect(
+      caller.user.switchTeam({ teamId: "second_team" }),
+    ).resolves.toMatchObject({
+      previousTeamId: LOCAL_DESKTOP_TEAM_ID,
+      teamId: "second_team",
+    });
+  });
+
+  test("does not call hosted delete dependencies in local desktop mode", async () => {
+    const caller = await createLocalCaller();
+
+    await expect(caller.user.delete()).resolves.toMatchObject({
+      id: LOCAL_DESKTOP_USER_ID,
+      fullName: "Local User",
     });
   });
 
@@ -154,5 +215,45 @@ describe("local desktop tRPC bootstrap", () => {
 
     expect(context?.session?.user.id).toBe(LOCAL_DESKTOP_USER_ID);
     expect(context?.session?.teamId).toBe(LOCAL_DESKTOP_TEAM_ID);
+  });
+
+  test("accepts the desktop session token through REST auth middleware", async () => {
+    const [{ withAuth }, { Hono }] = await Promise.all([
+      import("../../rest/middleware/auth"),
+      import("hono"),
+    ]);
+    const app = new Hono();
+
+    app.use("*", async (c, next) => {
+      const context = c as any;
+      context.set("db", {});
+      await withAuth(c, next);
+    });
+    app.get("/", (c) => {
+      const context = c as any;
+      const session = context.get("session");
+      const user = context.get("user");
+
+      return c.json({
+        teamId: context.get("teamId"),
+        userId: user?.id,
+        fullName: user?.fullName,
+        sessionUserId: session?.user.id,
+      });
+    });
+
+    const response = await app.request("http://localhost/", {
+      headers: {
+        Authorization: `Bearer ${LOCAL_DESKTOP_SESSION_TOKEN}`,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      fullName: "Local User",
+      sessionUserId: LOCAL_DESKTOP_USER_ID,
+      teamId: LOCAL_DESKTOP_TEAM_ID,
+      userId: LOCAL_DESKTOP_USER_ID,
+    });
   });
 });

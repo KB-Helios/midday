@@ -8,6 +8,7 @@ import {
   seedLocalWorkspace,
 } from "./client";
 import {
+  getSeededLocalDb,
   getLocalOverviewSummary,
   getLocalTeamById,
   getLocalTeamMembersByTeamId,
@@ -121,6 +122,35 @@ describe("local identity queries", () => {
       });
     } finally {
       local.close();
+    }
+  });
+
+  test("seeds the default local workspace only once per database", () => {
+    const previousPath = process.env.MIDDAY_SQLITE_PATH;
+    process.env.MIDDAY_SQLITE_PATH = join(createTempDir(), "midday.sqlite");
+
+    try {
+      const local = getSeededLocalDb();
+
+      expect(getLocalUserById(local, "local_user")).toMatchObject({
+        fullName: "Local User",
+      });
+
+      updateLocalUser(local, {
+        id: "local_user",
+        fullName: "Renamed Owner",
+      });
+
+      expect(getSeededLocalDb()).toBe(local);
+      expect(getLocalUserById(local, "local_user")).toMatchObject({
+        fullName: "Renamed Owner",
+      });
+    } finally {
+      if (previousPath === undefined) {
+        delete process.env.MIDDAY_SQLITE_PATH;
+      } else {
+        process.env.MIDDAY_SQLITE_PATH = previousPath;
+      }
     }
   });
 

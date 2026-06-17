@@ -118,8 +118,8 @@ impl std::error::Error for LocalServiceError {}
 
 fn is_ready(url: &str) -> Result<bool, String> {
     match ureq::get(url).timeout(Duration::from_secs(2)).call() {
-        Ok(response) => Ok((200..500).contains(&response.status())),
-        Err(ureq::Error::Status(status, _)) => Ok((200..500).contains(&status)),
+        Ok(response) => Ok((200..400).contains(&response.status())),
+        Err(ureq::Error::Status(status, _)) => Ok((200..400).contains(&status)),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -309,12 +309,33 @@ fn spawn_service(repo_root: PathBuf, command: ServiceCommand) -> Result<Child, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
 
     fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
             .iter()
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect()
+    }
+
+    fn one_shot_http_status(status: u16, reason: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_buffer = [0; 1024];
+            let _ = stream.read(&mut request_buffer);
+            write!(
+                stream,
+                "HTTP/1.1 {status} {reason}\r\nContent-Length: 0\r\n\r\n"
+            )
+            .unwrap();
+        });
+
+        url
     }
 
     #[test]
@@ -377,6 +398,13 @@ mod tests {
 
         assert_eq!(api_health_url(&config), None);
         assert_eq!(dashboard_health_url(&config), None);
+    }
+
+    #[test]
+    fn readiness_rejects_client_error_statuses() {
+        let url = one_shot_http_status(404, "Not Found");
+
+        assert_eq!(is_ready(&url), Ok(false));
     }
 
     #[test]

@@ -132,6 +132,7 @@ export function seedLocalWorkspace(
   const now = toIsoString(input.now) ?? new Date().toISOString();
   const expiresAt = toIsoString(input.expiresAt);
   const email = input.email ?? "local@midday.local";
+  const name = input.name ?? "Local User";
   const teamName = input.teamName ?? "Local Workspace";
 
   const seed = local.sqlite.transaction(() => {
@@ -144,7 +145,7 @@ export function seedLocalWorkspace(
           name = excluded.name,
           updated_at = excluded.updated_at`,
       )
-      .run(userId, email, input.name ?? null, now, now);
+      .run(userId, email, name, now, now);
 
     local.sqlite
       .query(

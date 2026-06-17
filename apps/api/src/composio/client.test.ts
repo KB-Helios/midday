@@ -32,4 +32,23 @@ describe("local Composio client", () => {
     expect(toolkits.items).toEqual([]);
     expect(tools).toEqual({});
   });
+
+  test("returns local detail fetch responses without an API key", async () => {
+    const { composioFetch } = await import("./client");
+
+    await expect(composioFetch("/tools?toolkit_slug=gmail")).resolves.toEqual({
+      items: [],
+      total_items: 0,
+    });
+
+    await expect(composioFetch("/toolkits/gmail")).resolves.toMatchObject({
+      composio_managed_auth_schemes: [],
+      meta: {
+        categories: [],
+        tools_count: 0,
+        triggers_count: 0,
+      },
+      slug: "gmail",
+    });
+  });
 });

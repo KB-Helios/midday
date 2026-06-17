@@ -53,6 +53,15 @@ type LocalUserRow = {
   avatar_url: string | null;
 };
 
+export class LocalTeamAccessError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalTeamAccessError";
+  }
+}
+
+let seededLocalDb: LocalDatabase | undefined;
+
 type LocalTeamRow = {
   id: string;
   name: string;
@@ -152,7 +161,12 @@ function getActiveTeamRowForUser(local: LocalDatabase, userId: string) {
 
 export function getSeededLocalDb() {
   const local = getLocalDb();
-  seedLocalWorkspace(local);
+
+  if (seededLocalDb !== local) {
+    seedLocalWorkspace(local);
+    seededLocalDb = local;
+  }
+
   return local;
 }
 
@@ -223,7 +237,7 @@ export function switchLocalUserTeam(
   const previousTeamId = getLocalUserById(local, params.userId)?.teamId ?? null;
 
   if (!hasLocalTeamAccess(local, params.teamId, params.userId)) {
-    throw new Error("User is not a member of the target team");
+    throw new LocalTeamAccessError("User is not a member of the target team");
   }
 
   local.sqlite

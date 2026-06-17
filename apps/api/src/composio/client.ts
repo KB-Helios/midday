@@ -29,7 +29,41 @@ export const composio = isLocalDesktopRuntime()
 
 const COMPOSIO_API_BASE = "https://backend.composio.dev/api/v3";
 
+function localComposioFetch<T>(path: string): T {
+  if (path.startsWith("/tools?")) {
+    return {
+      items: [],
+      total_items: 0,
+    } as T;
+  }
+
+  const toolkitMatch = path.match(/^\/toolkits\/([^/?]+)/);
+  if (toolkitMatch) {
+    const slug = decodeURIComponent(toolkitMatch[1] ?? "local");
+
+    return {
+      slug,
+      name: slug,
+      meta: {
+        description: "",
+        logo: "",
+        app_url: null,
+        categories: [],
+        tools_count: 0,
+        triggers_count: 0,
+      },
+      composio_managed_auth_schemes: [],
+    } as T;
+  }
+
+  return {} as T;
+}
+
 export async function composioFetch<T>(path: string): Promise<T> {
+  if (isLocalDesktopRuntime()) {
+    return localComposioFetch<T>(path);
+  }
+
   if (!process.env.COMPOSIO_API_KEY) {
     throw new Error("Composio API key is not configured");
   }

@@ -61,14 +61,13 @@ async function resolveTeamPermission(
       });
     }
 
-    if (
-      user.teamId &&
-      !hasLocalTeamAccess(local, user.teamId, userId)
-    ) {
+    const teamId = session?.teamId ?? user.teamId;
+
+    if (teamId && !hasLocalTeamAccess(local, teamId, userId)) {
       teamPermissionLogger.warn("permission denied: local team access missing", {
         procedurePath,
         userId,
-        teamId: user.teamId,
+        teamId,
         requestId,
         cfRay,
       });
@@ -78,7 +77,7 @@ async function resolveTeamPermission(
       });
     }
 
-    return { teamId: user.teamId };
+    return { teamId };
   }
 
   const dbStart = DEBUG_PERF ? performance.now() : 0;

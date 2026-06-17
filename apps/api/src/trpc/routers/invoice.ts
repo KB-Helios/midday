@@ -306,7 +306,7 @@ export const invoiceRouter = createTRPCRouter({
           title: defaultTemplate.title,
           logoUrl,
           currency,
-          size: defaultTemplate.size,
+          size,
           includeTax,
           includeVat: !includeTax,
           includeDiscount: defaultTemplate.includeDiscount,
