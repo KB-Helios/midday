@@ -10,11 +10,16 @@ import {
   globalSearchQuery,
   globalSemanticSearchQuery,
 } from "@midday/db/queries";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 
 export const searchRouter = createTRPCRouter({
   global: protectedProcedure
     .input(globalSearchSchema)
     .query(async ({ input, ctx: { db, teamId } }) => {
+      if (isLocalDesktopRuntime()) {
+        return [];
+      }
+
       const { searchTerm } = input;
 
       // Determine if we should fall back to LLM-generated filters:
@@ -60,6 +65,10 @@ export const searchRouter = createTRPCRouter({
   attachments: protectedProcedure
     .input(searchAttachmentsSchema)
     .query(async ({ input, ctx: { db, teamId } }) => {
+      if (isLocalDesktopRuntime()) {
+        return [];
+      }
+
       const { q, transactionId, limit = 30 } = input;
 
       const [inboxResults, invoiceResults] = await Promise.all([

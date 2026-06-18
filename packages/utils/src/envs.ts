@@ -62,3 +62,22 @@ export function getApiUrl() {
 
   return "http://localhost:3002";
 }
+
+type LocalRuntimeEnv = Record<string, string | undefined>;
+
+export const LOCAL_DESKTOP_USER_ID = "local_user";
+export const LOCAL_DESKTOP_TEAM_ID = "local_team";
+export const LOCAL_DESKTOP_SESSION_TOKEN = "local_session";
+
+function isEnabled(value: string | undefined) {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+export function isLocalDesktopRuntime(env: LocalRuntimeEnv = process.env) {
+  const runtime = env.MIDDAY_DESKTOP_RUNTIME;
+
+  return (
+    runtime?.toLowerCase() === "local" ||
+    isEnabled(env.MIDDAY_LOCAL_FIRST)
+  );
+}

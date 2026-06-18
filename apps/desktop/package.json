@@ -8,9 +8,10 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "MIDDAY_ENV=development tauri dev --config src-tauri/tauri.dev.conf.json",
-    "tauri:staging": "MIDDAY_ENV=staging tauri dev --config src-tauri/tauri.staging.conf.json",
-    "tauri:prod": "MIDDAY_ENV=production tauri dev",
+    "tauri:dev": "cross-env MIDDAY_DESKTOP_RUNTIME=local MIDDAY_DESKTOP_MANAGE_SERVICES=false MIDDAY_DASHBOARD_URL=http://localhost:3001 MIDDAY_API_URL=http://localhost:3003 tauri dev --config src-tauri/tauri.dev.conf.json",
+    "tauri:dev:managed": "cross-env MIDDAY_DESKTOP_RUNTIME=local MIDDAY_DESKTOP_MANAGE_SERVICES=true MIDDAY_DASHBOARD_URL=http://localhost:3001 MIDDAY_API_URL=http://localhost:3003 tauri dev --config src-tauri/tauri.dev.conf.json",
+    "tauri:remote:staging": "cross-env MIDDAY_DESKTOP_RUNTIME=remote MIDDAY_REMOTE_APP_URL=https://beta.midday.ai MIDDAY_REMOTE_API_URL=https://api.midday.ai tauri dev --config src-tauri/tauri.staging.conf.json",
+    "tauri:remote:prod": "cross-env MIDDAY_DESKTOP_RUNTIME=remote MIDDAY_REMOTE_APP_URL=https://app.midday.ai MIDDAY_REMOTE_API_URL=https://api.midday.ai tauri dev",
     "tauri:build:dev": "tauri build --config src-tauri/tauri.dev.conf.json",
     "tauri:build:staging": "tauri build --config src-tauri/tauri.staging.conf.json",
     "tauri:build:prod": "tauri build"

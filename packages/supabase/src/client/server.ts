@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { Database } from "../types";
+import { createLocalSupabaseClient, isLocalDesktopRuntime } from "./local";
 
 type CreateClientOptions = {
   admin?: boolean;
@@ -8,6 +9,10 @@ type CreateClientOptions = {
 };
 
 export async function createClient(options?: CreateClientOptions) {
+  if (isLocalDesktopRuntime()) {
+    return createLocalSupabaseClient();
+  }
+
   const { admin = false, ...rest } = options ?? {};
   const cookieStore = await cookies();
 

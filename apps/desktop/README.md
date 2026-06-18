@@ -1,79 +1,71 @@
 # Midday Desktop App
 
-A Tauri-based desktop application for Midday that supports multiple environments with a native transparent titlebar on macOS.
+A Tauri-based local-first desktop application for Midday with a native transparent titlebar on macOS.
 
 ## Features
 
-- **Environment Support**: Development, Staging, and Production environments
+- **Local-First Runtime**: Loads the local dashboard and API by default
+- **Remote Diagnostics**: Hosted app modes remain available for diagnostics
 - **Transparent Titlebar**: Native macOS transparent titlebar with traffic light buttons
 - **Responsive Design**: Minimum window size of 1450x900 for optimal experience
 
-## Environment Configuration
+## Runtime Configuration
 
-The desktop app supports three environments, each loading a different URL:
+The desktop app is local-first by default. It opens the local dashboard at
+`http://localhost:3001`, and the dashboard talks to the local API at
+`http://localhost:3003`.
 
-- **Development**: `http://localhost:3001`
-- **Staging**: `https://beta.midday.ai`
-- **Production**: `https://app.midday.ai`
+### Development With Existing Dev Servers
 
-## Running the App
+Run the dashboard and API in separate terminals from the repository root:
 
-### Development Mode
 ```bash
-# Run in development environment (loads localhost:3001)
-bun run tauri:dev
+bun run dev:api
+bun run dev:dashboard
 ```
 
-### Staging Mode
+Then run the desktop shell:
+
 ```bash
-# Run in staging environment (loads beta.midday.ai)
-bun run tauri:staging
+bun run --filter @midday/desktop tauri:dev
 ```
 
-### Production Mode
+### Development With Desktop-Managed Services
+
+The desktop shell can also start the dashboard and API dev servers:
+
 ```bash
-# Run in production environment (loads app.midday.ai)
-bun run tauri:prod
+bun run --filter @midday/desktop tauri:dev:managed
+```
+
+This mode is the Phase 1 bridge toward packaged sidecars. The packaged build
+will replace dev commands with bundled sidecar binaries.
+
+### Remote Diagnostics
+
+Remote mode is kept only for diagnosing hosted app behavior:
+
+```bash
+bun run --filter @midday/desktop tauri:remote:staging
+bun run --filter @midday/desktop tauri:remote:prod
 ```
 
 ## Building the App
 
 ### Development Build
+
 ```bash
-bun run tauri:build
+bun run --filter @midday/desktop tauri:build:dev
 ```
 
 ### Staging Build
+
 ```bash
-bun run tauri:build:staging
+bun run --filter @midday/desktop tauri:build:staging
 ```
 
 ### Production Build
-```bash
-bun run tauri:build:prod
-```
-
-## Environment Variable
-
-The environment is controlled by the `MIDDAY_ENV` environment variable:
-
-- `development` or `dev` → `http://localhost:3001`
-- `staging` → `https://beta.midday.ai`
-- `production` or `prod` → `https://app.midday.ai`
-
-If no environment is specified, it defaults to development mode.
-
-## Manual Environment Setting
-
-You can also set the environment manually:
 
 ```bash
-# macOS/Linux
-MIDDAY_ENV=staging tauri dev
-
-# Windows (PowerShell)
-$env:MIDDAY_ENV="staging"; tauri dev
-
-# Windows (Command Prompt)
-set MIDDAY_ENV=staging && tauri dev
+bun run --filter @midday/desktop tauri:build:prod
 ```

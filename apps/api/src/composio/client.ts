@@ -3,16 +3,76 @@ import { VercelProvider } from "@composio/vercel";
 import { connectorsCache } from "@midday/cache/connectors-cache";
 import { CURATED_TOOLKIT_SLUGS } from "@midday/connectors";
 import { logger } from "@midday/logger";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 import { LRUCache } from "lru-cache";
 
-export const composio = new Composio({
-  apiKey: process.env.COMPOSIO_API_KEY,
-  provider: new VercelProvider(),
-});
+function createLocalComposio() {
+  return {
+    connectedAccounts: {
+      delete: async () => ({}),
+      list: async () => ({ items: [] }),
+    },
+    create: async () => ({
+      authorize: async () => ({ redirectUrl: null }),
+      toolkits: async () => ({ items: [] }),
+      tools: async () => ({}),
+    }),
+  } as unknown as Composio;
+}
+
+export const composio = isLocalDesktopRuntime()
+  ? createLocalComposio()
+  : new Composio({
+      apiKey: process.env.COMPOSIO_API_KEY,
+      provider: new VercelProvider(),
+    });
 
 const COMPOSIO_API_BASE = "https://backend.composio.dev/api/v3";
 
+function localComposioFetch<T>(path: string): T {
+  if (path.startsWith("/tools?")) {
+    return {
+      items: [],
+      total_items: 0,
+    } as T;
+  }
+
+  const toolkitMatch = path.match(/^\/toolkits\/([^/?]+)/);
+  if (toolkitMatch) {
+    let slug: string;
+    try {
+      slug = decodeURIComponent(toolkitMatch[1] ?? "local");
+    } catch {
+      slug = "local";
+    }
+
+    return {
+      slug,
+      name: slug,
+      meta: {
+        description: "",
+        logo: "",
+        app_url: null,
+        categories: [],
+        tools_count: 0,
+        triggers_count: 0,
+      },
+      composio_managed_auth_schemes: [],
+    } as T;
+  }
+
+  return {} as T;
+}
+
 export async function composioFetch<T>(path: string): Promise<T> {
+  if (isLocalDesktopRuntime()) {
+    return localComposioFetch<T>(path);
+  }
+
+  if (!process.env.COMPOSIO_API_KEY) {
+    throw new Error("Composio API key is not configured");
+  }
+
   const res = await fetch(`${COMPOSIO_API_BASE}${path}`, {
     headers: { "x-api-key": process.env.COMPOSIO_API_KEY! },
   });
@@ -108,7 +168,7 @@ export async function getComposioTools(
       manageConnections: false,
       workbench: { enable: false },
     });
-    const tools = await session.tools();
+    const tools = (await session.tools()) as Record<string, unknown>;
     toolsCache.set(userId, tools);
     return tools;
   } catch (err) {

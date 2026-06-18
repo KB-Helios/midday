@@ -5,6 +5,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "bun test --exit",
+    "test:local": "bun test src/local/client.test.ts src/local/queries.test.ts src/local/runtime-clients.test.ts",
     "eval:matching:db": "bun run src/scripts/matching-eval-db.ts",
     "eval:progress": "bun run src/scripts/matching-progress.ts",
     "eval:similar": "bun run src/scripts/eval-similar-transactions.ts",
@@ -22,6 +23,8 @@
   },
   "exports": {
     "./client": "./src/client.ts",
+    "./local-client": "./src/local/client.ts",
+    "./local-queries": "./src/local/queries.ts",
     "./job-client": "./src/job-client.ts",
     "./worker-client": "./src/worker-client.ts",
     "./queries": "./src/queries/index.ts",

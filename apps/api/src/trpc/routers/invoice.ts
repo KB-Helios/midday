@@ -44,11 +44,17 @@ import {
   searchInvoiceNumber,
   updateInvoice,
 } from "@midday/db/queries";
+import {
+  getLocalTeamById,
+  getLocalUserById,
+  getSeededLocalDb,
+} from "@midday/db/local-queries";
 import { DEFAULT_TEMPLATE } from "@midday/invoice";
 import { verify } from "@midday/invoice/token";
 import { transformCustomerToContent } from "@midday/invoice/utils";
 import { decodeJobId, getQueue, triggerJob } from "@midday/job-client";
 import { createLoggerWithContext } from "@midday/logger";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 import { TRPCError } from "@trpc/server";
 import { addDays, format, parseISO } from "date-fns";
 import { v4 as uuidv4 } from "uuid";
@@ -58,6 +64,89 @@ const logger = createLoggerWithContext("trpc:invoice");
 
 // Use the shared default template from @midday/invoice
 const defaultTemplate = DEFAULT_TEMPLATE;
+
+// Shared utility to build savedTemplate object
+function buildSavedTemplate(params: {
+  template: Awaited<ReturnType<typeof getInvoiceTemplate>> | null;
+  user: Awaited<ReturnType<typeof getUserById>> | null;
+  team: Awaited<ReturnType<typeof getTeamById>> | null;
+  geo: { locale?: string; timezone?: string; country?: string } | undefined;
+}) {
+  const { template, user, geo, team } = params;
+  const locale = user?.locale ?? geo?.locale ?? "en";
+  const timezone = user?.timezone ?? geo?.timezone ?? "America/New_York";
+  const currency =
+    template?.currency ?? team?.baseCurrency ?? defaultTemplate.currency;
+  const dateFormat =
+    template?.dateFormat ?? user?.dateFormat ?? defaultTemplate.dateFormat;
+  const logoUrl = template?.logoUrl ?? defaultTemplate.logoUrl;
+  const countryCode = geo?.country ?? "US";
+  const size = ["US", "CA"].includes(countryCode) ? "letter" : "a4";
+  const includeTax = ["US", "CA", "AU", "NZ", "SG", "MY", "IN"].includes(
+    countryCode,
+  );
+
+  return {
+    id: template?.id,
+    name: template?.name ?? "Default",
+    isDefault: template?.isDefault ?? true,
+    title: template?.title ?? defaultTemplate.title,
+    logoUrl,
+    currency,
+    size: template?.size ?? size,
+    includeTax: template?.includeTax ?? includeTax,
+    includeVat: template?.includeVat ?? !includeTax,
+    includeDiscount:
+      template?.includeDiscount ?? defaultTemplate.includeDiscount,
+    includeDecimals:
+      template?.includeDecimals ?? defaultTemplate.includeDecimals,
+    includeUnits: template?.includeUnits ?? defaultTemplate.includeUnits,
+    includeQr: template?.includeQr ?? defaultTemplate.includeQr,
+    includeLineItemTax:
+      template?.includeLineItemTax ?? defaultTemplate.includeLineItemTax,
+    lineItemTaxLabel:
+      template?.lineItemTaxLabel ?? defaultTemplate.lineItemTaxLabel,
+    includePdf: template?.includePdf ?? defaultTemplate.includePdf,
+    sendCopy: template?.sendCopy ?? defaultTemplate.sendCopy,
+    customerLabel: template?.customerLabel ?? defaultTemplate.customerLabel,
+    fromLabel: template?.fromLabel ?? defaultTemplate.fromLabel,
+    invoiceNoLabel:
+      template?.invoiceNoLabel ?? defaultTemplate.invoiceNoLabel,
+    subtotalLabel: template?.subtotalLabel ?? defaultTemplate.subtotalLabel,
+    issueDateLabel:
+      template?.issueDateLabel ?? defaultTemplate.issueDateLabel,
+    totalSummaryLabel:
+      template?.totalSummaryLabel ?? defaultTemplate.totalSummaryLabel,
+    dueDateLabel: template?.dueDateLabel ?? defaultTemplate.dueDateLabel,
+    discountLabel: template?.discountLabel ?? defaultTemplate.discountLabel,
+    descriptionLabel:
+      template?.descriptionLabel ?? defaultTemplate.descriptionLabel,
+    priceLabel: template?.priceLabel ?? defaultTemplate.priceLabel,
+    quantityLabel: template?.quantityLabel ?? defaultTemplate.quantityLabel,
+    totalLabel: template?.totalLabel ?? defaultTemplate.totalLabel,
+    vatLabel: template?.vatLabel ?? defaultTemplate.vatLabel,
+    taxLabel: template?.taxLabel ?? defaultTemplate.taxLabel,
+    paymentLabel: template?.paymentLabel ?? defaultTemplate.paymentLabel,
+    noteLabel: template?.noteLabel ?? defaultTemplate.noteLabel,
+    dateFormat,
+    deliveryType: template?.deliveryType ?? defaultTemplate.deliveryType,
+    taxRate: template?.taxRate ?? defaultTemplate.taxRate,
+    vatRate: template?.vatRate ?? defaultTemplate.vatRate,
+    fromDetails: template?.fromDetails ?? defaultTemplate.fromDetails,
+    paymentDetails:
+      template?.paymentDetails ?? defaultTemplate.paymentDetails,
+    noteDetails: template?.noteDetails ?? defaultTemplate.noteDetails,
+    timezone,
+    locale,
+    paymentEnabled:
+      template?.paymentEnabled ?? defaultTemplate.paymentEnabled,
+    paymentTermsDays: template?.paymentTermsDays ?? 30,
+    emailSubject: template?.emailSubject ?? null,
+    emailHeading: template?.emailHeading ?? null,
+    emailBody: template?.emailBody ?? null,
+    emailButtonText: template?.emailButtonText ?? null,
+  };
+}
 
 export const invoiceRouter = createTRPCRouter({
   get: protectedProcedure
@@ -278,6 +367,72 @@ export const invoiceRouter = createTRPCRouter({
 
   defaultSettings: protectedProcedure.query(
     async ({ ctx: { db, teamId, session, geo } }) => {
+      if (isLocalDesktopRuntime()) {
+        const local = getSeededLocalDb();
+        const team = getLocalTeamById(local, teamId!);
+        const user = getLocalUserById(local, session.user.id);
+
+        const savedTemplate = buildSavedTemplate({
+          template: null,
+          user: user
+            ? {
+                locale: user.locale,
+                dateFormat: user.dateFormat,
+                timezone: user.timezone,
+              }
+            : null,
+          team: team
+            ? {
+                baseCurrency: team.baseCurrency,
+              }
+            : null,
+          geo,
+        });
+
+        const paymentTermsDays = savedTemplate.paymentTermsDays ?? 30;
+        const currency = savedTemplate.currency;
+        const size = savedTemplate.size as "a4" | "letter";
+        const timezone = savedTemplate.timezone;
+        const locale = savedTemplate.locale;
+
+        return {
+          id: uuidv4(),
+          currency,
+          status: "draft",
+          size,
+          includeTax: savedTemplate.includeTax,
+          includeVat: savedTemplate.includeVat,
+          includeDiscount: false,
+          includeDecimals: false,
+          includePdf: false,
+          sendCopy: false,
+          includeUnits: false,
+          includeQr: true,
+          invoiceNumber: "INV-0001",
+          timezone,
+          locale,
+          fromDetails: savedTemplate.fromDetails,
+          paymentDetails: savedTemplate.paymentDetails,
+          customerDetails: undefined,
+          noteDetails: savedTemplate.noteDetails,
+          customerId: undefined,
+          issueDate: new UTCDate().toISOString(),
+          dueDate: addDays(new UTCDate(), paymentTermsDays).toISOString(),
+          lineItems: [{ name: "", quantity: 0, price: 0, vat: 0 }],
+          tax: undefined,
+          token: undefined,
+          discount: undefined,
+          subtotal: undefined,
+          topBlock: undefined,
+          bottomBlock: undefined,
+          amount: undefined,
+          customerName: undefined,
+          logoUrl: undefined,
+          vat: undefined,
+          template: savedTemplate,
+        };
+      }
+
       // Fetch invoice number, template, and team details concurrently
       const [nextInvoiceNumber, template, team, user] = await Promise.all([
         getNextInvoiceNumber(db, teamId!),
@@ -286,89 +441,24 @@ export const invoiceRouter = createTRPCRouter({
         getUserById(db, session.user.id),
       ]);
 
-      const locale = user?.locale ?? geo?.locale ?? "en";
-      const timezone = user?.timezone ?? geo?.timezone ?? "America/New_York";
-      const currency =
-        template?.currency ?? team?.baseCurrency ?? defaultTemplate.currency;
-      const dateFormat =
-        template?.dateFormat ?? user?.dateFormat ?? defaultTemplate.dateFormat;
-      const logoUrl = template?.logoUrl ?? defaultTemplate.logoUrl;
+      const savedTemplate = buildSavedTemplate({
+        template,
+        user,
+        team,
+        geo,
+      });
+
+      const currency = savedTemplate.currency;
+      const size = savedTemplate.size as "a4" | "letter";
+      const timezone = savedTemplate.timezone;
+      const locale = savedTemplate.locale;
       const countryCode = geo?.country ?? "US";
-
-      // Default to letter size for US/CA, A4 for rest of world
-      const size = ["US", "CA"].includes(countryCode) ? "letter" : "a4";
-
-      // Default to include sales tax for countries where it's common
       const includeTax = ["US", "CA", "AU", "NZ", "SG", "MY", "IN"].includes(
         countryCode,
       );
-
-      const savedTemplate = {
-        id: template?.id,
-        name: template?.name ?? "Default",
-        isDefault: template?.isDefault ?? true,
-        title: template?.title ?? defaultTemplate.title,
-        logoUrl,
-        currency,
-        size: template?.size ?? defaultTemplate.size,
-        includeTax: template?.includeTax ?? includeTax,
-        includeVat: template?.includeVat ?? !includeTax,
-        includeDiscount:
-          template?.includeDiscount ?? defaultTemplate.includeDiscount,
-        includeDecimals:
-          template?.includeDecimals ?? defaultTemplate.includeDecimals,
-        includeUnits: template?.includeUnits ?? defaultTemplate.includeUnits,
-        includeQr: template?.includeQr ?? defaultTemplate.includeQr,
-        includeLineItemTax:
-          template?.includeLineItemTax ?? defaultTemplate.includeLineItemTax,
-        lineItemTaxLabel:
-          template?.lineItemTaxLabel ?? defaultTemplate.lineItemTaxLabel,
-        includePdf: template?.includePdf ?? defaultTemplate.includePdf,
-        sendCopy: template?.sendCopy ?? defaultTemplate.sendCopy,
-        customerLabel: template?.customerLabel ?? defaultTemplate.customerLabel,
-        fromLabel: template?.fromLabel ?? defaultTemplate.fromLabel,
-        invoiceNoLabel:
-          template?.invoiceNoLabel ?? defaultTemplate.invoiceNoLabel,
-        subtotalLabel: template?.subtotalLabel ?? defaultTemplate.subtotalLabel,
-        issueDateLabel:
-          template?.issueDateLabel ?? defaultTemplate.issueDateLabel,
-        totalSummaryLabel:
-          template?.totalSummaryLabel ?? defaultTemplate.totalSummaryLabel,
-        dueDateLabel: template?.dueDateLabel ?? defaultTemplate.dueDateLabel,
-        discountLabel: template?.discountLabel ?? defaultTemplate.discountLabel,
-        descriptionLabel:
-          template?.descriptionLabel ?? defaultTemplate.descriptionLabel,
-        priceLabel: template?.priceLabel ?? defaultTemplate.priceLabel,
-        quantityLabel: template?.quantityLabel ?? defaultTemplate.quantityLabel,
-        totalLabel: template?.totalLabel ?? defaultTemplate.totalLabel,
-        vatLabel: template?.vatLabel ?? defaultTemplate.vatLabel,
-        taxLabel: template?.taxLabel ?? defaultTemplate.taxLabel,
-        paymentLabel: template?.paymentLabel ?? defaultTemplate.paymentLabel,
-        noteLabel: template?.noteLabel ?? defaultTemplate.noteLabel,
-        dateFormat,
-        deliveryType: template?.deliveryType ?? defaultTemplate.deliveryType,
-        taxRate: template?.taxRate ?? defaultTemplate.taxRate,
-        vatRate: template?.vatRate ?? defaultTemplate.vatRate,
-        fromDetails: template?.fromDetails ?? defaultTemplate.fromDetails,
-        paymentDetails:
-          template?.paymentDetails ?? defaultTemplate.paymentDetails,
-        noteDetails: template?.noteDetails ?? defaultTemplate.noteDetails,
-        timezone,
-        locale,
-        paymentEnabled:
-          template?.paymentEnabled ?? defaultTemplate.paymentEnabled,
-        paymentTermsDays: template?.paymentTermsDays ?? 30,
-        emailSubject: template?.emailSubject ?? null,
-        emailHeading: template?.emailHeading ?? null,
-        emailBody: template?.emailBody ?? null,
-        emailButtonText: template?.emailButtonText ?? null,
-      };
-
-      // Calculate due date based on payment terms (default 30 days)
       const paymentTermsDays = savedTemplate.paymentTermsDays ?? 30;
 
       return {
-        // Default values first
         id: uuidv4(),
         currency,
         status: "draft",

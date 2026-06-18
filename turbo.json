@@ -77,6 +77,19 @@
     },
     "dev": {
       "inputs": ["$TURBO_DEFAULT$", ".env"],
+      "passThroughEnv": [
+        "ALLOWED_API_ORIGINS",
+        "API_INTERNAL_URL",
+        "FILE_KEY_SECRET",
+        "MIDDAY_DESKTOP_DATA_DIR",
+        "MIDDAY_DESKTOP_RUNTIME",
+        "MIDDAY_LOCAL_FIRST",
+        "MIDDAY_SQLITE_PATH",
+        "NEXT_PUBLIC_API_URL",
+        "NEXT_PUBLIC_MIDDAY_DESKTOP_RUNTIME",
+        "NEXT_PUBLIC_MIDDAY_LOCAL_FIRST",
+        "PORT"
+      ],
       "persistent": true,
       "cache": false
     },

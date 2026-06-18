@@ -1,6 +1,8 @@
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import type { Database } from "./client";
+import { getLocalDb } from "./local/client";
 import * as schema from "./schema";
 
 const isDevelopment = process.env.NODE_ENV === "development";
@@ -12,6 +14,13 @@ const isDevelopment = process.env.NODE_ENV === "development";
  * - Separate disconnect function for lifecycle management
  */
 export const createJobDb = () => {
+  if (isLocalDesktopRuntime()) {
+    return {
+      db: getLocalDb().db as unknown as Database,
+      disconnect: async () => {},
+    };
+  }
+
   const jobPool = new Pool({
     connectionString: process.env.DATABASE_PRIMARY_POOLER_URL!,
     max: 1,

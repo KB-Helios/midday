@@ -6,7 +6,9 @@ import { getRequestTrace } from "@api/utils/request-trace";
 import { safeCompare } from "@api/utils/safe-compare";
 import type { Database } from "@midday/db/client";
 import { db } from "@midday/db/client";
+import { getSeededLocalDb } from "@midday/db/local-queries";
 import { createLoggerWithContext } from "@midday/logger";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { initTRPC, TRPCError } from "@trpc/server";
 import type { Context } from "hono";
@@ -47,6 +49,10 @@ export const createTRPCContext = async (
   const jwtStart = DEBUG_PERF ? performance.now() : 0;
   const session = await verifyAccessToken(accessToken);
   const jwtMs = DEBUG_PERF ? performance.now() - jwtStart : 0;
+
+  if (isLocalDesktopRuntime()) {
+    getSeededLocalDb();
+  }
 
   const supaStart = DEBUG_PERF ? performance.now() : 0;
   const supabase = await createClient(accessToken);

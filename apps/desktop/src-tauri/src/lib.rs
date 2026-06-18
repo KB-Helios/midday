@@ -1,18 +1,20 @@
+use image;
 use serde_json;
-use std::env;
 use std::sync::{Arc, Mutex};
+#[cfg(target_os = "macos")]
+use tauri::TitleBarStyle;
+use tauri::image::Image;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    Emitter, Listener, Manager, PhysicalPosition, Position, TitleBarStyle, WebviewUrl,
-    WebviewWindowBuilder,
+    Emitter, Listener, Manager, PhysicalPosition, Position, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_deep_link::DeepLinkExt;
-use tauri_plugin_updater;
 use tauri_plugin_dialog;
 use tauri_plugin_process;
-use tauri::menu::{Menu, MenuItem};
-use tauri::image::Image;
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use image;
+use tauri_plugin_updater;
+
+pub mod local_services;
 
 // Global state for search window availability
 type SearchWindowState = Arc<Mutex<bool>>;
@@ -42,22 +44,28 @@ fn show_window(window: tauri::Window) -> Result<(), String> {
 /// Shared by both manual and silent update flows.
 #[cfg(desktop)]
 async fn prompt_and_install_update(app: &tauri::AppHandle, update: tauri_plugin_updater::Update) {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogKind, MessageDialogButtons};
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
-    let answer = app.dialog()
-        .message(format!("A new version {} is available. Would you like to update now?", update.version))
+    let answer = app
+        .dialog()
+        .message(format!(
+            "A new version {} is available. Would you like to update now?",
+            update.version
+        ))
         .title("Update Available")
         .kind(MessageDialogKind::Info)
         .buttons(MessageDialogButtons::OkCancel)
         .blocking_show();
 
     if answer {
-        let _ = update.download_and_install(
-            |_chunk_length, _content_length| {},
-            || {
-                println!("Update download finished");
-            }
-        ).await;
+        let _ = update
+            .download_and_install(
+                |_chunk_length, _content_length| {},
+                || {
+                    println!("Update download finished");
+                },
+            )
+            .await;
     }
 }
 
@@ -87,9 +95,9 @@ async fn silent_update_check(app: tauri::AppHandle) {
 /// Shows dialogs for all outcomes: update available, up-to-date, and errors.
 #[tauri::command]
 async fn check_for_updates(app: tauri::AppHandle) -> Result<(), String> {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogKind, MessageDialogButtons};
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     use tauri_plugin_updater::UpdaterExt;
-    
+
     #[cfg(desktop)]
     {
         if let Ok(updater) = app.updater() {
@@ -124,7 +132,7 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<(), String> {
                 .blocking_show();
         }
     }
-    
+
     #[cfg(not(desktop))]
     {
         app.dialog()
@@ -134,7 +142,7 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<(), String> {
             .buttons(MessageDialogButtons::Ok)
             .blocking_show();
     }
-    
+
     Ok(())
 }
 
@@ -273,7 +281,7 @@ async fn create_preloaded_search_window(
     let search_window_label = "search";
     let search_url = format!("{}/desktop/search", app_url);
 
-    let mut search_builder = WebviewWindowBuilder::new(
+    let search_builder = WebviewWindowBuilder::new(
         app,
         search_window_label,
         WebviewUrl::External(tauri::Url::parse(&search_url)?),
@@ -293,7 +301,8 @@ async fn create_preloaded_search_window(
     });
 
     // Platform-specific styling
-    search_builder = search_builder
+    #[cfg(target_os = "macos")]
+    let search_builder = search_builder
         .hidden_title(true)
         .title_bar_style(TitleBarStyle::Overlay);
 
@@ -333,39 +342,10 @@ async fn create_preloaded_search_window(
 }
 
 fn get_app_url() -> String {
-    // Try runtime environment variable first, then fall back to compile-time
-    let env = env::var("MIDDAY_ENV")
-        .unwrap_or_else(|_| {
-            option_env!("MIDDAY_ENV")
-                .unwrap_or("development")
-                .to_string()
-        });
-
-    println!("🌍 Environment detected: {}", env);
-
-    match env.as_str() {
-        "development" | "dev" => {
-            let url = "http://localhost:3001".to_string();
-            println!("🌍 Using development URL: {}", url);
-            url
-        },
-        "staging" => {
-            let url = "https://beta.midday.ai".to_string();
-            println!("🌍 Using staging URL: {}", url);
-            url
-        },
-        "production" | "prod" => {
-            let url = "https://app.midday.ai".to_string();
-            println!("🌍 Using production URL: {}", url);
-            url
-        },
-        _ => {
-            eprintln!("Unknown environment: {}, defaulting to development", env);
-            let url = "http://localhost:3001".to_string();
-            println!("🌍 Using fallback development URL: {}", url);
-            url
-        }
-    }
+    let config = local_services::resolve_config_from_env(&local_services::current_env());
+    println!("🌍 Desktop runtime: {:?}", config.mode);
+    println!("🌍 Dashboard URL: {}", config.dashboard_url);
+    config.dashboard_url
 }
 
 fn is_external_url(url: &str, app_url: &str) -> bool {
@@ -446,19 +426,50 @@ pub fn run() {
                 });
             }
 
+            let local_config =
+                local_services::resolve_config_from_env(&local_services::current_env());
+            let mut local_manager = local_services::LocalServiceManager::new(local_config.clone());
+
+            if local_config.manage_processes {
+                local_manager
+                    .start_dev_services(local_services::repo_root_from_manifest())
+                    .map_err(|error| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("Failed to start local services: {error}"),
+                        )
+                    })?;
+            }
+
+            if matches!(
+                local_config.mode,
+                local_services::DesktopRuntimeMode::Local
+            ) {
+                tauri::async_runtime::block_on(local_manager.wait_until_ready()).map_err(
+                    |error| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("Local services were not ready: {error}"),
+                        )
+                    },
+                )?;
+            }
+
+            app.manage(Mutex::new(local_manager));
+
             let app_url_clone = app_url.clone();
             let app_handle = app.handle().clone();
 
             // Create shared search window state
             let search_state: SearchWindowState = Arc::new(Mutex::new(false));
-            
+
             // Add search state to managed state so commands can access it
             app.manage(search_state.clone());
 
             // Clone app_handle before it gets moved into closures
             let app_handle_for_deep_links = app_handle.clone();
             let app_handle_for_navigation = app_handle.clone();
-            
+
             // Auth state is now accessed via managed state for consistency
 
             // Initialize global shortcuts
@@ -481,7 +492,7 @@ pub fn run() {
                                 if let Some(managed_search_state) = app_handle.try_state::<SearchWindowState>() {
                                     let current_search_state = *managed_search_state.lock().unwrap();
                                     println!("🔍 Shortcut: Search state from managed state: {}", current_search_state);
-                                    
+
                                     // Use the same app_handle for both search state and toggle function
                                     let result = toggle_search_window(app_handle, &managed_search_state);
                                     match result {
@@ -535,9 +546,14 @@ pub fn run() {
             .decorations(false)
             .visible(false)
             .transparent(true)
-            .shadow(true)
-            .hidden_title(true)
-            .title_bar_style(TitleBarStyle::Overlay)
+            .shadow(true);
+
+            #[cfg(target_os = "macos")]
+            let win_builder = win_builder
+                .hidden_title(true)
+                .title_bar_style(TitleBarStyle::Overlay);
+
+            let win_builder = win_builder
             .disable_drag_drop_handler()
             .on_download(|_window, _event| {
                 println!("Download triggered!");
@@ -577,7 +593,7 @@ pub fn run() {
                     println!("🔍 Event received: search-window-enabled = {}", enabled);
                     *search_state_for_events.lock().unwrap() = enabled;
                     println!("🔍 Search window state updated to {}", enabled);
-                    
+
                     // If search is disabled, clean up search window to prevent interference
                     if !enabled {
                         println!("🔍 Search disabled, cleaning up search window");
@@ -673,6 +689,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri app")
         .run(|app_handle, event| match event {
+            #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => {
                 if let Some(main_window) = app_handle.get_webview_window("main") {
                     let _ = main_window.show();
@@ -682,7 +699,7 @@ pub fn run() {
             tauri::RunEvent::ExitRequested { api, .. } => {
                 // Prevent app from quitting to keep global shortcuts working
                 api.prevent_exit();
-                
+
                 // Hide all windows instead of quitting
                 if let Some(main_window) = app_handle.get_webview_window("main") {
                     let _ = main_window.hide();

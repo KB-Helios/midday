@@ -26,12 +26,13 @@ tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = "0.24"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "process", "io-util"] }
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2.2.2"
 tauri-plugin-process = "2.2.1"
 tauri-plugin-upload = "2"
 tauri-plugin-fs = "2"
+ureq = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"

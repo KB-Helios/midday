@@ -1,4 +1,5 @@
 import { createEnv } from "@t3-oss/env-core";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 import { z } from "zod";
 
 export const env = createEnv({
@@ -20,4 +21,5 @@ export const env = createEnv({
     LOGO_DEV_TOKEN: z.string().min(1),
   },
   runtimeEnv: process.env,
+  skipValidation: isLocalDesktopRuntime(),
 });

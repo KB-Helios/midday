@@ -3,6 +3,7 @@ import { expandScopes } from "@api/utils/scopes";
 import { isValidApiKeyFormat } from "@db/utils/api-keys";
 import { apiKeyCache } from "@midday/cache/api-key-cache";
 import { userCache } from "@midday/cache/user-cache";
+import { getLocalUserById, getSeededLocalDb } from "@midday/db/local-queries";
 import {
   getApiKeyByToken,
   getUserById,
@@ -10,6 +11,10 @@ import {
   validateAccessToken,
 } from "@midday/db/queries";
 import { hash } from "@midday/encryption";
+import {
+  isLocalDesktopRuntime,
+  LOCAL_DESKTOP_SESSION_TOKEN,
+} from "@midday/utils/envs";
 import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 
@@ -35,6 +40,37 @@ export const withAuth: MiddlewareHandler = async (c, next) => {
   // Handle Supabase JWT tokens (try to verify as JWT first)
   const supabaseSession = await verifyAccessToken(token);
   if (supabaseSession) {
+    if (
+      isLocalDesktopRuntime() &&
+      token === LOCAL_DESKTOP_SESSION_TOKEN
+    ) {
+      const user = getLocalUserById(
+        getSeededLocalDb(),
+        supabaseSession.user.id,
+      );
+
+      if (!user) {
+        throw new HTTPException(401, { message: "User not found" });
+      }
+
+      const session = {
+        teamId: supabaseSession.teamId ?? user.teamId,
+        user: {
+          id: user.id,
+          email: user.email,
+          full_name: user.fullName ?? undefined,
+        },
+      };
+
+      c.set("session", session);
+      c.set("teamId", session.teamId);
+      c.set("user", user);
+      c.set("scopes", expandScopes(["apis.all"]));
+
+      await next();
+      return;
+    }
+
     // Get user from database to get team info
     const user = await getUserById(db, supabaseSession.user.id);
 

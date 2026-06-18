@@ -11,12 +11,40 @@ import {
   switchUserTeam,
   updateUser,
 } from "@midday/db/queries";
+import {
+  getLocalUserById,
+  getSeededLocalDb,
+  LocalTeamAccessError,
+  switchLocalUserTeam,
+  updateLocalUser,
+} from "@midday/db/local-queries";
 import { generateFileKey } from "@midday/encryption";
+import { isLocalDesktopRuntime } from "@midday/utils/envs";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
+const switchTeamInputSchema = z.object({
+  teamId: z.string().min(1).refine(
+    (teamId) => isLocalDesktopRuntime() || z.string().uuid().safeParse(teamId).success,
+    { message: "Invalid team id" },
+  ),
+});
+
 export const userRouter = createTRPCRouter({
   me: protectedProcedure.query(async ({ ctx: { db, session } }) => {
+    if (isLocalDesktopRuntime()) {
+      const result = getLocalUserById(getSeededLocalDb(), session.user.id);
+
+      if (!result) {
+        return undefined;
+      }
+
+      return {
+        ...result,
+        fileKey: result.teamId ? await generateFileKey(result.teamId) : null,
+      };
+    }
+
     // Cookie-based approach handles replication lag for new users via x-force-primary header
     // Retry logic still handles connection errors/timeouts
     const result = await withRetryOnPrimary(db, async (dbInstance) =>
@@ -36,6 +64,13 @@ export const userRouter = createTRPCRouter({
   update: protectedProcedure
     .input(updateUserSchema)
     .mutation(async ({ ctx: { db, session }, input }) => {
+      if (isLocalDesktopRuntime()) {
+        return updateLocalUser(getSeededLocalDb(), {
+          id: session.user.id,
+          ...input,
+        });
+      }
+
       return updateUser(db, {
         id: session.user.id,
         ...input,
@@ -43,8 +78,26 @@ export const userRouter = createTRPCRouter({
     }),
 
   switchTeam: protectedProcedure
-    .input(z.object({ teamId: z.string().uuid() }))
+    .input(switchTeamInputSchema)
     .mutation(async ({ ctx: { db, session }, input }) => {
+      if (isLocalDesktopRuntime()) {
+        try {
+          return switchLocalUserTeam(getSeededLocalDb(), {
+            userId: session.user.id,
+            teamId: input.teamId,
+          });
+        } catch (error) {
+          if (error instanceof LocalTeamAccessError) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "You are not a member of this team",
+            });
+          }
+
+          throw error;
+        }
+      }
+
       let result: Awaited<ReturnType<typeof switchUserTeam>>;
 
       try {
@@ -72,6 +125,10 @@ export const userRouter = createTRPCRouter({
     }),
 
   delete: protectedProcedure.mutation(async ({ ctx: { db, session } }) => {
+    if (isLocalDesktopRuntime()) {
+      return getLocalUserById(getSeededLocalDb(), session.user.id);
+    }
+
     const supabaseAdmin = await createAdminClient();
 
     const [data] = await Promise.all([
@@ -87,6 +144,10 @@ export const userRouter = createTRPCRouter({
   }),
 
   invites: protectedProcedure.query(async ({ ctx: { db, session } }) => {
+    if (isLocalDesktopRuntime()) {
+      return [];
+    }
+
     if (!session.user.email) {
       return [];
     }
